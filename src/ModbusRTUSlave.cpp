@@ -1,6 +1,6 @@
 #include "ModbusRTUSlave.h"
 
-ModbusRTUSlave::ModbusRTUSlave(Stream& serial, int8_t dePin, int8_t rePin) : _rtuComm(serial, dePin, rePin) {
+ModbusRTUSlave::ModbusRTUSlave(Stream& serial, int dePin, int rePin) : _rtuComm(serial, dePin, rePin) {
   
 }
 
