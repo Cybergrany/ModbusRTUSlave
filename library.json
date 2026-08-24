@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+  "name": "ModbusRTUSlave",
+  "version": "2.0.6",
+  "description": "Arduino Modbus RTU slave/server implementation.",
+  "keywords": [
+    "arduino",
+    "modbus",
+    "modbus-rtu",
+    "modbus-slave",
+    "serial"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cybergrany/ModbusRTUSlave.git"
+  },
+  "authors": [
+    {
+      "name": "C. M. Bulliner"
+    },
+    {
+      "name": "OpenGameMaster contributors",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "*",
+  "headers": [
+    "ModbusRTUSlave.h"
+  ],
+  "export": {
+    "exclude": [
+      ".git",
+      ".github",
+      ".pio"
+    ]
+  },
+  "build": {
+    "includeDir": "src",
+    "srcDir": "src"
+  }
+}
+

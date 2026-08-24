@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "repository": "ModbusRTUSlave",
+  "compatibility_branch": "ogm/compat",
+  "upstream": {
+    "url": "https://github.com/CMB27/ModbusRTUSlave.git",
+    "reviewed_head": "83c2b50e32c0d10ea8e300761f1bbd058eb9d1bd",
+    "compatibility_branch_point": "65ae4dd4cf121f42a3a9daa917034e319ebed65e",
+    "compatibility_source_files": {
+      "src/ModbusRTUSlave.h": "3a1aabe890727ffe4568661f06e5ec2db0989ae13e7c79318551fe6b011da9bf",
+      "src/ModbusRTUSlave.cpp": "4e0d2f8256e5a9c082923f4b8a9065153cc878cbdad5f77dbedc3f96d25f402c"
+    }
+  },
+  "ogm_import": {
+    "repository": "OGM_slave_core",
+    "commit": "6ce585ddfcaba7e4517700f858c53410b935caae",
+    "files": {
+      "third_party/ModbusRTU/ModbusRTUSlave.h": "e8f60c30b2bf8b35c2998ebbab90e13ebfc94c1d5faa8735ed338e0cecf09b23",
+      "third_party/ModbusRTU/ModbusRTUSlave.cpp": "784dfba03faf7d23d117effe7dbd83e83af5d3300dfd1bd4a09a729dbb2d6c5c"
+    },
+    "delta_from_branch_point": "AVR SoftwareSerial declarations and calls commented out"
+  },
+  "lineage_references": {
+    "ModbusADU": {
+      "url": "https://github.com/CMB27/ModbusADU.git",
+      "commit": "7cb0e24f0abe86bc83e114325d75fe7a7d878562",
+      "tag": "1.0.2",
+      "used_by_compatibility_seed": false
+    },
+    "ModbusSlaveLogic": {
+      "url": "https://github.com/CMB27/ModbusSlaveLogic.git",
+      "commit": "85b579741c7772588b532f277ded569f9d8fcbeb",
+      "tag": "1.0.1",
+      "used_by_compatibility_seed": false
+    }
+  },
+  "ogm_functional_replay": "not_started"
+}
+
