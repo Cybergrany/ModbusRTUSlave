@@ -6,6 +6,128 @@
 > and package metadata only; the functional OGM replay has not begun. See
 > [OGM_FORK_PROVENANCE.md](OGM_FORK_PROVENANCE.md) before using it.
 
+This repository preserves two intentionally different histories:
+
+| Ref | Purpose | Consumer guidance |
+| --- | --- | --- |
+| `main` | Mirrors the current `CMB27/ModbusRTUSlave` line without OGM changes. | Use to review upstream work, not as an automatic OGM upgrade. |
+| `ogm/compat` | Starts at CMB27 `65ae4dd4cf121f42a3a9daa917034e319ebed65e`, the self-contained 2.x source used as OGM's base. | Replay OGM changes here in small, test-gated commits. Consume only an immutable validated tag or commit. |
+
+The exact anchors, source hashes and replay policy are recorded in
+[OGM_FORK_PROVENANCE.md](OGM_FORK_PROVENANCE.md) and
+[`ogm-fork-lock.json`](ogm-fork-lock.json). Do not merge or rebase `main` into
+`ogm/compat`: upstream 3.x decomposition is a separate behavior and API change.
+
+## Compatibility-line status
+
+The seed keeps `src/ModbusRTUSlave.h` and `src/ModbusRTUSlave.cpp` unchanged
+from the historical CMB27 branch point. Package/provenance files have been
+added, but the functional OGM replay has not begun. Check
+`ogm_functional_replay` in `ogm-fork-lock.json` before treating a revision as a
+migration candidate.
+
+The first OGM import disabled AVR `SoftwareSerial`; later OGM work added
+platform services, synchronization, mutation observation, ingress journaling,
+bridge forwarding support, diagnostics and fixes. None of that behavior is
+claimed by this seed. It will be replayed behind neutral library contracts and
+tested before any OGM consumer switches ownership.
+
+## Installing a validated compatibility release
+
+PlatformIO consumers should pin an immutable compatibility tag or full commit,
+never a moving branch:
+
+```ini
+lib_deps =
+  https://github.com/Cybergrany/ModbusRTUSlave.git#<validated-tag-or-40-char-commit>
+```
+
+The compatibility package is intentionally self-contained. Do not add the
+newer upstream ModbusADU, ModbusRTUComm or ModbusSlaveLogic decomposition as
+implicit dependencies: that would be an API and implementation migration, not
+a repository-only move. The ADU and SlaveLogic commits in
+`ogm-fork-lock.json` are lineage references only.
+
+For local extraction work, use a path dependency so the consumer and library
+changes are tested together:
+
+```ini
+lib_deps =
+  symlink:///absolute/path/to/ModbusRTUSlave
+```
+
+Before publishing a release, replace the local path with the immutable remote
+revision and rebuild the exact OGM slave, bridge and master dependency trees
+from clean dependency caches.
+
+## Compatibility-seed usage example
+
+This historical 2.x implementation owns UART startup. Configure the backing
+arrays before `begin()`, then call `poll()` frequently from the application
+loop. A unit ID of zero is reserved for broadcast requests; configure a normal
+slave with an ID from 1 through 247.
+
+```cpp
+#include <Arduino.h>
+#include <ModbusRTUSlave.h>
+
+namespace {
+constexpr uint8_t kUnitId = 7;
+constexpr uint8_t kDriverEnablePin = 2;
+constexpr unsigned long kBaud = 115200UL;
+
+bool coils[16] = {};
+bool discreteInputs[16] = {};
+uint16_t holdingRegisters[32] = {};
+uint16_t inputRegisters[32] = {};
+ModbusRTUSlave modbus(Serial1, kDriverEnablePin);
+}
+
+void setup() {
+  modbus.configureCoils(coils, 16);
+  modbus.configureDiscreteInputs(discreteInputs, 16);
+  modbus.configureHoldingRegisters(holdingRegisters, 32);
+  modbus.configureInputRegisters(inputRegisters, 32);
+  modbus.setResponseDelay(0);
+  modbus.begin(kUnitId, kBaud, SERIAL_8N1);
+}
+
+void loop() {
+  modbus.poll();
+}
+```
+
+This documents the seed API only. The functional replay may add neutral
+extension points while preserving existing OGM call sites; consult the header
+at the pinned release for its exact API.
+
+## OGM compatibility contract
+
+Moving slave protocol ownership into this repository must not change:
+
+- accepted and rejected request bytes, CRC checks, address/range validation,
+  response bytes or exception codes for function codes 1, 2, 3, 4, 5, 6, 15
+  and 16;
+- broadcast mutation-without-response behavior, malformed-frame handling, or
+  when backing arrays become visible to OGM observers;
+- inter-character/frame timeout boundaries, response delay, UART write/flush,
+  driver-enable transitions, compensation delay or receive-buffer cleanup;
+- request, mutation, callback, ingress-journal and bridge-forwarding order;
+- lock spans, caller-visible status/diagnostics, fixed-capacity behavior, stack,
+  RAM, flash or hot-path performance beyond the accepted gates;
+- compatibility with the existing OGM master/bridge and deployed original
+  slave firmware.
+
+Native fixtures and byte comparisons can strongly constrain these properties,
+but they cannot prove UART interrupt latency, RS485 electrical timing,
+scheduler behavior, drain duration or bus contention. The compatibility tag
+therefore still requires physical validation after its software gates pass.
+
+## Historical upstream API documentation
+
+The reference below is retained from the CMB27 2.x branch point. The pinned
+source and compatibility contract above are authoritative for extraction work.
+
 Modbus is an industrial communication protocol. The RTU variant communicates over serial lines such as UART, RS-232, or RS-485. The full details of the Modbus protocol can be found at [modbus.org](https://modbus.org). A good summary can also be found on [Wikipedia](https://en.wikipedia.org/wiki/Modbus).
 
 This is an Arduino library that implements the slave/server logic of the Modbus RTU protocol. This library implements function codes 1 (Read Coils), 2 (Read Discrete Inputs), 3 (Read Holding Registers), 4 (Read Input Registers), 5 (Write Single Coil), 6 (Write Single Holding Register), 15 (Write Multiple Coils), and 16 (Write Multiple Holding Registers).

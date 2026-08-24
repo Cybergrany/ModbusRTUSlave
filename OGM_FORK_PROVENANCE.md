@@ -38,6 +38,13 @@ ModbusSlaveLogic revisions in the lock file document the later upstream 3.x
 decomposition; they are lineage references, not runtime dependencies of this
 2.x seed and must not be silently introduced during the compatibility replay.
 
+The reviewed reference pins are:
+
+| Repository | Commit | Upstream tag | Role in this seed |
+| --- | --- | --- | --- |
+| CMB27/ModbusADU | `7cb0e24f0abe86bc83e114325d75fe7a7d878562` | `1.0.2` | Reference for the later 3.x ADU extraction; not linked. |
+| CMB27/ModbusSlaveLogic | `85b579741c7772588b532f277ded569f9d8fcbeb` | `1.0.1` | Reference for the later 3.1 logic extraction; not linked. |
+
 ## Remote layout
 
 ```text
@@ -59,9 +66,45 @@ The `upstream/main:main` push must remain fast-forward-only in practice. If Git
 rejects it, inspect the fork divergence; do not force-push either long-lived
 line.
 
-## Initial release rule
+## Replay and release policy
 
-The seed is for provenance inspection and packaging checks. It is not an OGM
-consumer candidate until the functional replay, software parity gates and
-physical RS485 validation have been completed against immutable revisions.
+1. Replay current OGM slave behavior as small, reviewable themes. Record the
+   exact source OGM commit or commit range in each replay commit message.
+2. Keep GPIO, clocks, serial drain, locks, diagnostics and threading behind
+   neutral platform contracts. Keep external-board, child, bridge-route and
+   game concepts out of the public Modbus slave API.
+3. Keep the OGM ingress journal and product forwarding policy in adapters unless
+   a neutral callback contract is required; preserve admission, mutation and
+   durable-record ordering at that boundary.
+4. Pin releases by immutable tag or commit. Never consume `main` or
+   `ogm/compat` by moving branch name.
+5. Reconcile the newer CMB27 3.x decomposition only as a separate, explicitly
+   test-gated migration after the compatibility package is proven.
 
+## Compatibility release gates
+
+A revision on `ogm/compat` is suitable for an OGM consumer only after all of
+the following evidence is recorded against the exact dependency tuple:
+
+1. Source provenance: every replay commit names its source OGM commit(s), the
+   package lock is current, and consumer manifests resolve immutable commits.
+2. Protocol parity: exhaustive valid, invalid, exception, CRC, truncated,
+   overlength and broadcast fixtures produce the frozen OGM mutations,
+   responses and statuses for all supported function codes.
+3. Ordering parity: admission, backing-store mutation, observer callback,
+   ingress-journal record/commit and bridge forwarding retain their established
+   order, including rejected and no-response requests.
+4. Timing parity: inter-character/frame boundaries, response delay, serial
+   write/drain, DE/RE transitions, post-delay and cleanup match trace oracles.
+5. Resource/performance parity: paired hot-path gates pass and stack, RAM and
+   flash changes are measured and accepted on the relevant AVR and GIGA builds.
+6. Consumer validation: native suites plus exact OGM slave, bridge and master
+   firmware builds pass from clean dependency caches. Legacy slave firmware
+   remains build- and protocol-compatible where it is part of the baseline.
+7. Hardware validation: the release candidate is exercised over the physical
+   GIGA/RS485 topology with unchanged deployed slave firmware.
+
+Passing gates 1 through 6 supports a hardware checkpoint because the migration
+should not alter on-wire behavior; it does not replace gate 7. Likewise,
+hardware that merely appears playable does not replace exhaustive trace,
+ordering, timing and performance gates.
