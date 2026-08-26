@@ -7,7 +7,6 @@
 #include <type_traits>
 
 #include "detail/ModbusRTUIngressJournal.h"
-#include "LegacyModbusIngressJournalReference.h"
 
 namespace AllocationProbe {
 static bool enabled = false;
@@ -49,26 +48,25 @@ void fail(const char* expression, const char* file, int line) {
 
 typedef ModbusRTU::FixedCapacityIngressJournal<4U, 3U, 5U>
     NeutralJournal;
-typedef LegacyModbusIngressJournalReference::Journal<4U, 3U, 5U>
-    LegacyJournal;
 typedef ModbusRTU::FixedCapacityIngressJournal<64U, 32U, 50U>
     ProductionShapeJournal;
 
-// Exercise the zero-copy compatibility seam used by ModbusRTUSlave without
-// importing Arduino, OGM register definitions, or the production facade.
-struct CompatEntry {
+// Exercise the custom-entry seam without importing Arduino or the slave
+// facade. Deliberately different field names prove that EntryTraits, rather
+// than a hidden record layout, define the journal contract.
+struct CustomEntry {
   uint16_t start;
   uint16_t count;
-  uint16_t sessionGeneration;
+  uint16_t requestContext;
   uint16_t sourceToken;
-  uint8_t ops;
-  uint8_t meta;
+  uint8_t workUnits;
+  uint8_t entryAttributes;
   uint8_t snapshotCount;
   ModbusRTU::FixedCapacityIngressSnapshot<4U, 3U> snapshot;
 };
 
-struct CompatEntryTraits {
-  typedef CompatEntry Entry;
+struct CustomEntryTraits {
+  typedef CustomEntry Entry;
   static uint16_t sourceToken(const Entry& entry) { return entry.sourceToken; }
   static void initialize(Entry& entry, uint16_t start, uint16_t count,
                          uint16_t context, uint16_t sourceToken,
@@ -76,10 +74,10 @@ struct CompatEntryTraits {
                          uint8_t snapshotCount) {
     entry.start = start;
     entry.count = count;
-    entry.sessionGeneration = context;
+    entry.requestContext = context;
     entry.sourceToken = sourceToken;
-    entry.ops = units;
-    entry.meta = entryAttributes;
+    entry.workUnits = units;
+    entry.entryAttributes = entryAttributes;
     entry.snapshotCount = snapshotCount;
   }
   static void copyCoils(Entry& entry, const bool* values, uint16_t count) {
@@ -94,8 +92,8 @@ struct CompatEntryTraits {
 };
 
 typedef ModbusRTU::FixedCapacityIngressJournal<4U, 3U, 5U,
-                                                CompatEntryTraits>
-    CompatJournal;
+                                                CustomEntryTraits>
+    CustomJournal;
 
 enum class OracleTable : uint8_t { Coils = 0U, Holding = 1U };
 
@@ -213,87 +211,13 @@ struct NeutralAdapter {
   }
 };
 
-struct LegacyAdapter {
-  typedef LegacyJournal::Reservation Reservation;
-  LegacyJournal journal;
+struct CustomAdapter {
+  typedef CustomJournal::Reservation Reservation;
+  CustomJournal journal;
 
-  static LegacyModbusIngressJournalReference::Table table(OracleTable value) {
-    return value == OracleTable::Coils
-        ? LegacyModbusIngressJournalReference::Table::Coils
-        : LegacyModbusIngressJournalReference::Table::Holding;
-  }
-  bool reserve(OracleTable tableValue, uint16_t start, uint16_t count,
-               uint16_t context, uint8_t entryAttributes, Reservation& out) {
-    return journal.reserve(table(tableValue), start, count,
-                           (entryAttributes & 0x80U) != 0U,
-                           (entryAttributes & 0x40U) != 0U, context, out);
-  }
-  bool publishCoils(const Reservation& reservation, const bool* values) {
-    return journal.append(reservation, values);
-  }
-  bool publishHolding(const Reservation& reservation, const uint16_t* values) {
-    return journal.append(reservation, values);
-  }
-  bool peek(OracleTable tableValue, NormalizedEntry& out) const {
-    LegacyJournal::Entry entry;
-    if (!journal.peek(table(tableValue), entry)) return false;
-    normalize(entry, tableValue, out);
-    return true;
-  }
-  bool peekNext(NormalizedEntry& out, OracleTable& tableValue) const {
-    LegacyJournal::Entry entry;
-    LegacyModbusIngressJournalReference::Table selected =
-        LegacyModbusIngressJournalReference::Table::Coils;
-    if (!journal.peekNext(entry, selected)) return false;
-    tableValue = selected == LegacyModbusIngressJournalReference::Table::Coils
-        ? OracleTable::Coils : OracleTable::Holding;
-    normalize(entry, tableValue, out);
-    return true;
-  }
-  bool retire(OracleTable tableValue, uint16_t token) {
-    return journal.commit(table(tableValue), token);
-  }
-  uint8_t freeSlots(OracleTable tableValue) const {
-    return static_cast<uint8_t>(4U - journal.sourceSize(table(tableValue)));
-  }
-  uint8_t requiredSlots(OracleTable tableValue, uint16_t count) const {
-    return journal.requiredSlots(table(tableValue), count);
-  }
-  uint16_t operationCount(OracleTable tableValue, uint16_t count) const {
-    const uint8_t slots = requiredSlots(tableValue, count);
-    return slots == 0U ? uint16_t(1U) : static_cast<uint16_t>(slots);
-  }
-
-  static void normalize(const LegacyJournal::Entry& entry,
-                        OracleTable tableValue, NormalizedEntry& out) {
-    out = NormalizedEntry();
-    out.table = tableValue;
-    out.start = entry.start;
-    out.count = entry.count;
-    out.context = entry.sessionGeneration;
-    out.sourceToken = entry.sourceToken;
-    out.units = entry.ops;
-    out.attributes = entry.meta;
-    out.snapshotCount = entry.snapshotCount;
-    if (tableValue == OracleTable::Coils) {
-      for (uint8_t index = 0U; index < entry.snapshotCount; ++index) {
-        out.coils[index] = entry.snapshot.coils[index];
-      }
-    } else {
-      for (uint8_t index = 0U; index < entry.snapshotCount; ++index) {
-        out.holding[index] = entry.snapshot.holding[index];
-      }
-    }
-  }
-};
-
-struct CompatAdapter {
-  typedef CompatJournal::Reservation Reservation;
-  CompatJournal journal;
-
-  static CompatJournal::Table table(OracleTable value) {
-    return value == OracleTable::Coils ? CompatJournal::Table::Coils
-                                       : CompatJournal::Table::HoldingRegisters;
+  static CustomJournal::Table table(OracleTable value) {
+    return value == OracleTable::Coils ? CustomJournal::Table::Coils
+                                       : CustomJournal::Table::HoldingRegisters;
   }
   bool reserve(OracleTable tableValue, uint16_t start, uint16_t count,
                uint16_t context, uint8_t entryAttributes, Reservation& out) {
@@ -307,16 +231,16 @@ struct CompatAdapter {
     return journal.publishHolding(reservation, values);
   }
   bool peek(OracleTable tableValue, NormalizedEntry& out) const {
-    CompatJournal::Entry entry;
+    CustomJournal::Entry entry;
     if (!journal.peek(table(tableValue), entry)) return false;
     normalize(entry, tableValue, out);
     return true;
   }
   bool peekNext(NormalizedEntry& out, OracleTable& tableValue) const {
-    CompatJournal::Entry entry;
-    CompatJournal::Table selected = CompatJournal::Table::Coils;
+    CustomJournal::Entry entry;
+    CustomJournal::Table selected = CustomJournal::Table::Coils;
     if (!journal.peekNext(entry, selected)) return false;
-    tableValue = selected == CompatJournal::Table::Coils
+    tableValue = selected == CustomJournal::Table::Coils
         ? OracleTable::Coils : OracleTable::Holding;
     normalize(entry, tableValue, out);
     return true;
@@ -328,16 +252,16 @@ struct CompatAdapter {
     return journal.freeSlots(table(tableValue));
   }
 
-  static void normalize(const CompatJournal::Entry& entry,
+  static void normalize(const CustomJournal::Entry& entry,
                         OracleTable tableValue, NormalizedEntry& out) {
     out = NormalizedEntry();
     out.table = tableValue;
     out.start = entry.start;
     out.count = entry.count;
-    out.context = entry.sessionGeneration;
+    out.context = entry.requestContext;
     out.sourceToken = entry.sourceToken;
-    out.units = entry.ops;
-    out.attributes = entry.meta;
+    out.units = entry.workUnits;
+    out.attributes = entry.entryAttributes;
     out.snapshotCount = entry.snapshotCount;
     if (tableValue == OracleTable::Coils) {
       for (uint8_t index = 0U; index < entry.snapshotCount; ++index) {
@@ -402,10 +326,10 @@ bool eventsEqual(const Event& lhs, const Event& rhs) {
       lhs.snapshotCount == rhs.snapshotCount && lhs.result == rhs.result;
 }
 
-void checkTraceEqual(const Trace& legacy, const Trace& neutral) {
-  CHECK(legacy.count == neutral.count);
-  for (uint8_t index = 0U; index < legacy.count; ++index) {
-    CHECK(eventsEqual(legacy.events[index], neutral.events[index]));
+void checkTraceEqual(const Trace& first, const Trace& second) {
+  CHECK(first.count == second.count);
+  for (uint8_t index = 0U; index < first.count; ++index) {
+    CHECK(eventsEqual(first.events[index], second.events[index]));
   }
 }
 
@@ -534,10 +458,10 @@ void checkAcceptedGolden(const Trace& trace) {
   }
 }
 
-void test_normalized_accepted_trace_matches_legacy_and_golden() {
-  const Trace legacy = runAcceptedTrace<LegacyAdapter>();
+void test_normalized_accepted_trace_matches_golden() {
   const Trace neutral = runAcceptedTrace<NeutralAdapter>();
-  checkTraceEqual(legacy, neutral);
+  const Trace custom = runAcceptedTrace<CustomAdapter>();
+  checkTraceEqual(neutral, custom);
   checkAcceptedGolden(neutral);
 }
 
@@ -578,8 +502,8 @@ void checkAllOrNothingReservation() {
 }
 
 void test_pre_admission_is_all_or_nothing_and_table_local() {
-  checkAllOrNothingReservation<LegacyAdapter>();
   checkAllOrNothingReservation<NeutralAdapter>();
+  checkAllOrNothingReservation<CustomAdapter>();
 }
 
 void test_foreign_stale_and_invalid_reservations_fail_closed() {
@@ -644,29 +568,29 @@ void test_chunk_counts_and_capacity_are_exact() {
 }
 
 void test_custom_entry_traits_preserve_opaque_units_and_attributes() {
-  CompatJournal journal;
-  CompatJournal::Reservation reservation;
-  CHECK(journal.reserve(CompatJournal::Table::HoldingRegisters,
+  CustomJournal journal;
+  CustomJournal::Reservation reservation;
+  CHECK(journal.reserve(CustomJournal::Table::HoldingRegisters,
                         30U, 4U, 0x1234U, 7U, 0xA5U, reservation));
   const uint16_t values[4] = {0x1010U, 0x2020U, 0x3030U, 0x4040U};
   CHECK(journal.publishHolding(reservation, values));
 
-  CompatEntry first;
-  CHECK(journal.peek(CompatJournal::Table::HoldingRegisters, first));
+  CustomEntry first;
+  CHECK(journal.peek(CustomJournal::Table::HoldingRegisters, first));
   CHECK(first.start == 30U && first.count == 3U);
-  CHECK(first.sessionGeneration == 0x1234U);
-  CHECK(first.ops == 7U && first.meta == 0xA5U);
+  CHECK(first.requestContext == 0x1234U);
+  CHECK(first.workUnits == 7U && first.entryAttributes == 0xA5U);
   CHECK(first.sourceToken == 2U && first.snapshotCount == 3U);
   CHECK(first.snapshot.holding[0] == 0x1010U);
   CHECK(first.snapshot.holding[2] == 0x3030U);
-  CHECK(journal.retire(CompatJournal::Table::HoldingRegisters,
+  CHECK(journal.retire(CustomJournal::Table::HoldingRegisters,
                        first.sourceToken));
 
-  CompatEntry second;
-  CHECK(journal.peek(CompatJournal::Table::HoldingRegisters, second));
+  CustomEntry second;
+  CHECK(journal.peek(CustomJournal::Table::HoldingRegisters, second));
   CHECK(second.start == 33U && second.count == 1U);
-  CHECK(second.sessionGeneration == 0x1234U);
-  CHECK(second.ops == 7U && second.meta == 0xA5U);
+  CHECK(second.requestContext == 0x1234U);
+  CHECK(second.workUnits == 7U && second.entryAttributes == 0xA5U);
   CHECK(second.sourceToken == 3U && second.snapshotCount == 1U);
   CHECK(second.snapshot.holding[0] == 0x4040U);
 }
@@ -710,15 +634,15 @@ void checkSourceRollover(NormalizedEntry& first, NormalizedEntry& second) {
   CHECK(second.sourceToken == 1U);
 }
 
-void test_source_token_rollover_matches_legacy() {
-  NormalizedEntry legacyFirst;
-  NormalizedEntry legacySecond;
+void test_source_token_rollover_is_ordered() {
   NormalizedEntry neutralFirst;
   NormalizedEntry neutralSecond;
-  checkSourceRollover<LegacyAdapter>(legacyFirst, legacySecond);
+  NormalizedEntry customFirst;
+  NormalizedEntry customSecond;
   checkSourceRollover<NeutralAdapter>(neutralFirst, neutralSecond);
-  CHECK(entriesEqual(legacyFirst, neutralFirst));
-  CHECK(entriesEqual(legacySecond, neutralSecond));
+  checkSourceRollover<CustomAdapter>(customFirst, customSecond);
+  CHECK(entriesEqual(neutralFirst, customFirst));
+  CHECK(entriesEqual(neutralSecond, customSecond));
 }
 
 void test_fixed_footprint_and_operations_allocate_nothing() {
@@ -726,10 +650,10 @@ void test_fixed_footprint_and_operations_allocate_nothing() {
                 "journal entries must remain simple fixed records");
   static_assert(std::is_trivially_copyable<NeutralJournal::Entry>::value,
                 "default entries must be safe for snapshot memcpy");
-  static_assert(std::is_standard_layout<CompatEntry>::value,
-                "compatibility entries must remain standard-layout");
-  static_assert(std::is_trivially_copyable<CompatEntry>::value,
-                "compatibility entries must be safe for snapshot memcpy");
+  static_assert(std::is_standard_layout<CustomEntry>::value,
+                "custom entries must remain standard-layout");
+  static_assert(std::is_trivially_copyable<CustomEntry>::value,
+                "custom entries must be safe for snapshot memcpy");
   static_assert(std::is_trivially_destructible<NeutralJournal>::value,
                 "journal teardown must not own dynamic resources");
   static_assert(!std::is_copy_constructible<NeutralJournal>::value,
@@ -738,9 +662,8 @@ void test_fixed_footprint_and_operations_allocate_nothing() {
                 "moving a journal would invalidate reservation ownership");
   CHECK(sizeof(NeutralJournal::Entry) == 18U);
   CHECK(sizeof(NeutralJournal) == 186U);
-  CHECK(sizeof(NeutralJournal) == sizeof(LegacyJournal));
-  CHECK(sizeof(CompatEntry) == sizeof(NeutralJournal::Entry));
-  CHECK(sizeof(CompatJournal) == sizeof(NeutralJournal));
+  CHECK(sizeof(CustomEntry) == sizeof(NeutralJournal::Entry));
+  CHECK(sizeof(CustomJournal) == sizeof(NeutralJournal));
   CHECK(sizeof(ProductionShapeJournal::Entry) == 76U);
   CHECK(sizeof(ProductionShapeJournal) == 7606U);
 
@@ -804,57 +727,45 @@ int64_t median(int64_t* values, uint8_t count) {
 }
 
 void test_forwarded_journal_performance_lane() {
-  const bool strict = std::getenv("OGM_STRICT_MODBUS_PERF") != 0;
+  const bool strict = std::getenv("MBUS_RTU_SLAVE_STRICT_PERFORMANCE") != 0;
   const uint8_t samples = strict ? 7U : 1U;
   const uint32_t operations = strict ? 1000000UL : 250000UL;
-  int64_t legacySamples[7] = {};
   int64_t neutralSamples[7] = {};
-  int64_t compatSamples[7] = {};
-  volatile uint32_t legacyChecksum = 0U;
+  int64_t customSamples[7] = {};
   volatile uint32_t neutralChecksum = 0U;
-  volatile uint32_t compatChecksum = 0U;
+  volatile uint32_t customChecksum = 0U;
 
   for (uint8_t sample = 0U; sample < samples; ++sample) {
     if ((sample & 1U) == 0U) {
-      legacySamples[sample] = benchmarkForwardedJournal<LegacyAdapter>(
-          operations, legacyChecksum);
       neutralSamples[sample] = benchmarkForwardedJournal<NeutralAdapter>(
           operations, neutralChecksum);
-      compatSamples[sample] = benchmarkForwardedJournal<CompatAdapter>(
-          operations, compatChecksum);
+      customSamples[sample] = benchmarkForwardedJournal<CustomAdapter>(
+          operations, customChecksum);
     } else {
-      compatSamples[sample] = benchmarkForwardedJournal<CompatAdapter>(
-          operations, compatChecksum);
+      customSamples[sample] = benchmarkForwardedJournal<CustomAdapter>(
+          operations, customChecksum);
       neutralSamples[sample] = benchmarkForwardedJournal<NeutralAdapter>(
           operations, neutralChecksum);
-      legacySamples[sample] = benchmarkForwardedJournal<LegacyAdapter>(
-          operations, legacyChecksum);
     }
-    CHECK(legacySamples[sample] > 0);
     CHECK(neutralSamples[sample] > 0);
-    CHECK(compatSamples[sample] > 0);
+    CHECK(customSamples[sample] > 0);
   }
-  CHECK(legacyChecksum == neutralChecksum);
-  CHECK(legacyChecksum == compatChecksum);
+  CHECK(neutralChecksum == customChecksum);
 
-  const int64_t legacyNs = median(legacySamples, samples);
   const int64_t neutralNs = median(neutralSamples, samples);
-  const int64_t compatNs = median(compatSamples, samples);
-  std::printf("ingress_journal_perf: legacy_median_ns=%lld "
-              "neutral_median_ns=%lld compat_median_ns=%lld "
+  const int64_t customNs = median(customSamples, samples);
+  std::printf("ingress_journal_perf: default_median_ns=%lld "
+              "custom_entry_median_ns=%lld "
               "ops=%u samples=%u strict=%u\n",
-              static_cast<long long>(legacyNs),
               static_cast<long long>(neutralNs),
-              static_cast<long long>(compatNs), operations, samples,
+              static_cast<long long>(customNs), operations, samples,
               strict ? 1U : 0U);
-  CHECK(legacyNs < 2000000000LL);
   CHECK(neutralNs < 2000000000LL);
-  CHECK(compatNs < 2000000000LL);
+  CHECK(customNs < 2000000000LL);
   if (strict) {
-    // Same-host migration gate against the frozen OGM behavior. The existing
-    // whole-slave absolute ceilings remain an independent strict gate.
-    CHECK(neutralNs <= legacyNs + (legacyNs / 20LL));
-    CHECK(compatNs <= legacyNs + (legacyNs / 20LL));
+    // A custom entry layout is a compile-time adapter and must not add a
+    // material runtime cost compared with the default entry.
+    CHECK(customNs <= neutralNs + (neutralNs / 20LL));
   }
 }
 
@@ -869,7 +780,7 @@ void runTest(const char* name, TestFunction function) {
 
 int main() {
   runTest("normalized accepted trace",
-          &test_normalized_accepted_trace_matches_legacy_and_golden);
+          &test_normalized_accepted_trace_matches_golden);
   runTest("all-or-nothing pre-admission",
           &test_pre_admission_is_all_or_nothing_and_table_local);
   runTest("foreign stale and invalid reservations",
@@ -879,7 +790,7 @@ int main() {
   runTest("custom entry opaque fields",
           &test_custom_entry_traits_preserve_opaque_units_and_attributes);
   runTest("source token rollover",
-          &test_source_token_rollover_matches_legacy);
+          &test_source_token_rollover_is_ordered);
   runTest("fixed footprint and no allocation",
           &test_fixed_footprint_and_operations_allocate_nothing);
   runTest("forwarded journal performance",

@@ -5,18 +5,11 @@
 #ifdef __AVR__
 #include <avr/pgmspace.h>
 #endif
-#ifdef USING_STATS
-#include "Pins/SlaveStats.h"
-#endif
-
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
 static constexpr uint8_t kModbusExceptionDeviceFailure = 0x04;
 ModbusRTUSlave::BridgeLocalRangeFn ModbusRTUSlave::_bridgeLocalRangeFn = nullptr;
 ModbusRTUSlave::BridgeLocalWriteFn ModbusRTUSlave::_bridgeLocalWriteFn = nullptr;
 ModbusRTUSlave::BridgeAdmissionFn ModbusRTUSlave::_bridgeAdmissionFn = nullptr;
-
-static_assert(sizeof(BridgeIngressEntry) == sizeof(BridgePending),
-              "The OGM bridge adapter must not inflate pending records");
 
 void ModbusRTUSlave::setBridgeLocalRangeFn(BridgeLocalRangeFn fn){
   _bridgeLocalRangeFn = fn;
@@ -35,12 +28,10 @@ bool ModbusRTUSlave::bridgeIsLocalRange(uint16_t start, uint16_t count, bool isC
 }
 
 bool ModbusRTUSlave::bridgeShouldNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil, bool isLocal) const{
-  if(isLocal){
-    return true;
-  }
-  // Bridge-active is the first bridge-local control coil, but it is allowed
-  // through the normal write queue so activation ordering stays unchanged.
-  return isCoil && count != 0 && start == 0;
+  (void)start;
+  (void)count;
+  (void)isCoil;
+  return isLocal;
 }
 
 void ModbusRTUSlave::bridgeNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil) const{
@@ -50,7 +41,7 @@ void ModbusRTUSlave::bridgeNotifyLocalWrite(uint16_t start, uint16_t count, bool
 }
 #endif
 
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
 namespace {
 
 inline void bridgeUpstreamTxDiagUpdateMax(uint32_t& target, uint32_t value){
@@ -93,31 +84,31 @@ void ModbusRTUSlave::bridgeUpstreamTxDiagNoteThresholds(
     uint32_t (&thresholds)[kBridgeUpstreamTxThresholdCount],
     bool pumpPhase){
   if(pumpPhase){
-    if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_2_MS){
+    if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_2_MS){
       ++thresholds[0];
     }
-    if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_5_MS){
+    if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_5_MS){
       ++thresholds[1];
     }
-    if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_10_MS){
+    if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_10_MS){
       ++thresholds[2];
     }
-    if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_20_MS){
+    if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_20_MS){
       ++thresholds[3];
     }
     return;
   }
 
-  if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_5_MS){
+  if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_5_MS){
     ++thresholds[0];
   }
-  if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_10_MS){
+  if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_10_MS){
     ++thresholds[1];
   }
-  if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_20_MS){
+  if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_20_MS){
     ++thresholds[2];
   }
-  if(valueMs >= BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_40_MS){
+  if(valueMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_40_MS){
     ++thresholds[3];
   }
 }
@@ -167,7 +158,7 @@ void ModbusRTUSlave::bridgeUpstreamTxDiagNoteTxDone(uint32_t doneUs){
   _bridgeUpstreamTxDiag.doneMsSum += doneMs;
   bridgeUpstreamTxDiagUpdateMax(_bridgeUpstreamTxDiag.doneMsMax, doneMs);
   bridgeUpstreamTxDiagNoteThresholds(doneMs, _bridgeUpstreamTxDiag.doneOverMs, false);
-  if(doneMs >= BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_20_MS){
+  if(doneMs >= MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_20_MS){
     ++_bridgeUpstreamTxDiag.bucketSlowDone[_bridgeUpstreamTxDiag.pendingFcIndex]
                                           [_bridgeUpstreamTxDiag.pendingQtyBucket];
   }
@@ -308,7 +299,7 @@ ModbusRTUSlave::ModbusRTUSlave(Serial_& serial, uint8_t dePin) {
 }
 #endif
 
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
 void ModbusRTUSlave::configurePlatformMutex(PlatformMutex* coilMut,
                                 PlatformMutex* diMut, 
                                 PlatformMutex* irMut,
@@ -366,7 +357,7 @@ void ModbusRTUSlave::begin(uint8_t id, unsigned long baud, uint32_t config) {
   if (id >= 1 && id <= 247) _id = id;
   if (_hardwareSerial) {
     _calculateTimeouts(baud, config);
-#if defined(ARDUINO_GIGA) && defined(OGM_BRIDGE_MODE)
+#if defined(ARDUINO_GIGA) && defined(MBUS_RTU_SLAVE_BRIDGE_MODE)
     if (config == SERIAL_8N1) {
       // Bridge-on-GIGA workaround: force 1-arg begin(baud) for 8N1 so we avoid
       // the 2-arg custom buffered-serial config parsing path that can corrupt
@@ -401,7 +392,7 @@ void ModbusRTUSlave::begin(uint8_t id, unsigned long baud, uint32_t config) {
 #endif
 
 void ModbusRTUSlave::poll() {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   const uint32_t now_us = micros();
   if (dbg_.last_poll_us != 0) {
     const uint32_t gap_ms = (now_us - dbg_.last_poll_us) / 1000u;
@@ -420,7 +411,7 @@ void ModbusRTUSlave::poll() {
   switch (fc) {
     case 1:
       if (br) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
         ++dbg_.ignored_broadcast_reads;
         dbg_.last_ignored_id = _buf[0];
         dbg_.last_ignored_fc = _buf[1];
@@ -434,7 +425,7 @@ void ModbusRTUSlave::poll() {
       break;
     case 2:
       if (br) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
         ++dbg_.ignored_broadcast_reads;
         dbg_.last_ignored_id = _buf[0];
         dbg_.last_ignored_fc = _buf[1];
@@ -448,7 +439,7 @@ void ModbusRTUSlave::poll() {
       break;
     case 3:
       if (br) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
         ++dbg_.ignored_broadcast_reads;
         dbg_.last_ignored_id = _buf[0];
         dbg_.last_ignored_fc = _buf[1];
@@ -462,7 +453,7 @@ void ModbusRTUSlave::poll() {
       break;
     case 4:
       if (br) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
         ++dbg_.ignored_broadcast_reads;
         dbg_.last_ignored_id = _buf[0];
         dbg_.last_ignored_fc = _buf[1];
@@ -497,33 +488,33 @@ void ModbusRTUSlave::poll() {
           if (!_coils || _numCoils == 0) return;
           if (value != 0 && value != 0xFF00) return;
           if (address >= _numCoils) return;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           const bool isLocal = bridgeIsLocalRange(address, 1, true);
-          uint16_t bridgeSessionGeneration = 0U;
+          uint16_t bridgeContext = 0U;
           BridgeIngressReservation bridgeReservation;
-          if(!bridgeWriteAllowed(address, 1, true, true, bridgeSessionGeneration)){
+          if(!bridgeWriteAllowed(address, 1, true, true, bridgeContext)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
           if(!isLocal && !bridgeReserveCoilIngress(
-              address, 1, true, bridgeSessionGeneration, false,
+              address, 1, true, bridgeContext, false,
               bridgeReservation)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_coilMut) _coilMut->lock();
           #endif
           _coils[address] = (value == 0xFF00);
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           bool bridgeQueued = isLocal ||
               bridgeCommitCoilIngress(bridgeReservation);
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_coilMut) _coilMut->unlock();
           #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           if(!bridgeQueued){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
@@ -539,33 +530,33 @@ void ModbusRTUSlave::poll() {
           uint16_t value   = _bytesToWord(_buf[base+2], _buf[base+3]);
           if (!_holdingRegisters || _numHoldingRegisters == 0) return;
           if (address >= _numHoldingRegisters) return;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           const bool isLocal = bridgeIsLocalRange(address, 1, false);
-          uint16_t bridgeSessionGeneration = 0U;
+          uint16_t bridgeContext = 0U;
           BridgeIngressReservation bridgeReservation;
-          if(!bridgeWriteAllowed(address, 1, false, true, bridgeSessionGeneration)){
+          if(!bridgeWriteAllowed(address, 1, false, true, bridgeContext)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
           if(!isLocal && !bridgeReserveHoldingIngress(
-              address, 1, true, bridgeSessionGeneration, false,
+              address, 1, true, bridgeContext, false,
               bridgeReservation)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_hrMut) _hrMut->lock();
           #endif
           _holdingRegisters[address] = value;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           bool bridgeQueued = isLocal ||
               bridgeCommitHoldingIngress(bridgeReservation);
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_hrMut) _hrMut->unlock();
           #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           if(!bridgeQueued){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
@@ -584,36 +575,36 @@ void ModbusRTUSlave::poll() {
           if (quantity == 0 || quantity > 1952) return;           // reduced max for FC69
           if (bc != _div8RndUp(quantity)) return;
           if (quantity > _numCoils || start > (_numCoils - quantity)) return;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           const bool isLocal = bridgeIsLocalRange(start, quantity, true);
-          uint16_t bridgeSessionGeneration = 0U;
+          uint16_t bridgeContext = 0U;
           BridgeIngressReservation bridgeReservation;
-          if(!bridgeWriteAllowed(start, quantity, true, true, bridgeSessionGeneration)){
+          if(!bridgeWriteAllowed(start, quantity, true, true, bridgeContext)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
           if(!isLocal && !bridgeReserveCoilIngress(
-              start, quantity, true, bridgeSessionGeneration, false,
+              start, quantity, true, bridgeContext, false,
               bridgeReservation)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
 #endif
           const uint8_t* data = &_buf[base+5];
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_coilMut) _coilMut->lock();
           #endif
           for (uint16_t i = 0; i < quantity; ++i) {
             _coils[start + i] = bitRead(data[i >> 3], i & 7);
           }
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           bool bridgeQueued = isLocal ||
               bridgeCommitCoilIngress(bridgeReservation);
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_coilMut) _coilMut->unlock();
           #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           if(!bridgeQueued){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
@@ -632,36 +623,36 @@ void ModbusRTUSlave::poll() {
           if (quantity == 0 || quantity > 122) return;            // reduced max for FC69
           if (bc != (quantity * 2)) return;
           if (quantity > _numHoldingRegisters || start > (_numHoldingRegisters - quantity)) return;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           const bool isLocal = bridgeIsLocalRange(start, quantity, false);
-          uint16_t bridgeSessionGeneration = 0U;
+          uint16_t bridgeContext = 0U;
           BridgeIngressReservation bridgeReservation;
-          if(!bridgeWriteAllowed(start, quantity, false, true, bridgeSessionGeneration)){
+          if(!bridgeWriteAllowed(start, quantity, false, true, bridgeContext)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
           if(!isLocal && !bridgeReserveHoldingIngress(
-              start, quantity, true, bridgeSessionGeneration, false,
+              start, quantity, true, bridgeContext, false,
               bridgeReservation)){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
 #endif
           const uint8_t* data = &_buf[base+5];
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_hrMut) _hrMut->lock();
           #endif
           for (uint16_t i = 0; i < quantity; ++i) {
             _holdingRegisters[start + i] = _bytesToWord(data[i * 2], data[i * 2 + 1]);
           }
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           bool bridgeQueued = isLocal ||
               bridgeCommitHoldingIngress(bridgeReservation);
 #endif
-          #ifdef OGM_USE_MUTEX
+          #ifdef MBUS_RTU_SLAVE_USE_MUTEX
           if(_hrMut) _hrMut->unlock();
           #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
           if(!bridgeQueued){
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
@@ -690,7 +681,7 @@ void ModbusRTUSlave::_processReadCoils() {
   uint16_t quantity     = _bytesToWord(_buf[4], _buf[5]);
   if (!_coils || _numCoils == 0) _exceptionResponse(1);
   else if (quantity == 0 || quantity > 2000) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -700,7 +691,7 @@ void ModbusRTUSlave::_processReadCoils() {
     _exceptionResponse(3);
   }
   else if (quantity > _numCoils || startAddress > (_numCoils - quantity)) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -714,7 +705,7 @@ void ModbusRTUSlave::_processReadCoils() {
     _buf[2] = byteCount;
     // Zero the reply bytes once, then set bits. Prevents stale bits in last byte per spec.
     memset(&_buf[3], 0, byteCount);
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; ++i) {
@@ -722,7 +713,7 @@ void ModbusRTUSlave::_processReadCoils() {
         _buf[3 + (i >> 3)] |= (uint8_t)(1U << (i & 7));
       }
     }
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->unlock();
     #endif
     _writeResponse(3 + byteCount);
@@ -734,7 +725,7 @@ void ModbusRTUSlave::_processReadDiscreteInputs() {
   uint16_t quantity     = _bytesToWord(_buf[4], _buf[5]);
   if (!_discreteInputs || _numDiscreteInputs == 0) _exceptionResponse(1);
   else if (quantity == 0 || quantity > 2000) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -744,7 +735,7 @@ void ModbusRTUSlave::_processReadDiscreteInputs() {
     _exceptionResponse(3);
   }
   else if (quantity > _numDiscreteInputs || startAddress > (_numDiscreteInputs - quantity)) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -758,7 +749,7 @@ void ModbusRTUSlave::_processReadDiscreteInputs() {
     _buf[2] = byteCount;
     // Zero the reply bytes once, then set bits.
     memset(&_buf[3], 0, byteCount);
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_diMut) _diMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; ++i) {
@@ -766,7 +757,7 @@ void ModbusRTUSlave::_processReadDiscreteInputs() {
         _buf[3 + (i >> 3)] |= (uint8_t)(1U << (i & 7));
       }
     }
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_diMut) _diMut->unlock();
     #endif
     _writeResponse(3 + byteCount);
@@ -778,7 +769,7 @@ void ModbusRTUSlave::_processReadHoldingRegisters() {
   uint16_t quantity = _bytesToWord(_buf[4], _buf[5]);
   if (!_holdingRegisters || _numHoldingRegisters == 0) _exceptionResponse(1);
   else if (quantity == 0 || quantity > 125) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -788,7 +779,7 @@ void ModbusRTUSlave::_processReadHoldingRegisters() {
     _exceptionResponse(3);
   }
   else if (quantity > _numHoldingRegisters || startAddress > (_numHoldingRegisters - quantity)) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -799,14 +790,14 @@ void ModbusRTUSlave::_processReadHoldingRegisters() {
   }
   else {
     _buf[2] = quantity * 2;
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; i++) {
       _buf[3 + (i * 2)] = highByte(_holdingRegisters[startAddress + i]);
       _buf[4 + (i * 2)] = lowByte(_holdingRegisters[startAddress + i]);
     }
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->unlock();
     #endif
     _writeResponse(3 + _buf[2]);
@@ -818,7 +809,7 @@ void ModbusRTUSlave::_processReadInputRegisters() {
   uint16_t quantity = _bytesToWord(_buf[4], _buf[5]);
   if (!_inputRegisters || _numInputRegisters == 0) _exceptionResponse(1);
   else if (quantity == 0 || quantity > 125) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -828,7 +819,7 @@ void ModbusRTUSlave::_processReadInputRegisters() {
     _exceptionResponse(3);
   }
   else if (quantity > _numInputRegisters || startAddress > (_numInputRegisters - quantity)) {
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     ++dbg_.ignored;
     dbg_.last_ignored_id = _buf[0];
     dbg_.last_ignored_fc = _buf[1];
@@ -839,14 +830,14 @@ void ModbusRTUSlave::_processReadInputRegisters() {
   }
   else {
     _buf[2] = quantity * 2;
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_irMut) _irMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; i++) {
       _buf[3 + (i * 2)] = highByte(_inputRegisters[startAddress + i]);
       _buf[4 + (i * 2)] = lowByte(_inputRegisters[startAddress + i]);
     }
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_irMut) _irMut->unlock();
     #endif
     _writeResponse(3 + _buf[2]);
@@ -860,33 +851,33 @@ void ModbusRTUSlave::_processWriteSingleCoil() {
   else if (value != 0 && value != 0xFF00) _exceptionResponse(3);
   else if (address >= _numCoils) _exceptionResponse(2);
   else {
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool isLocal = bridgeIsLocalRange(address, 1, true);
-    uint16_t bridgeSessionGeneration = 0U;
+    uint16_t bridgeContext = 0U;
     BridgeIngressReservation bridgeReservation;
-    if(!bridgeWriteAllowed(address, 1, true, false, bridgeSessionGeneration)){
+    if(!bridgeWriteAllowed(address, 1, true, false, bridgeContext)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
     if(!isLocal && !bridgeReserveCoilIngress(
-        address, 1, false, bridgeSessionGeneration, address != 0U,
+        address, 1, false, bridgeContext, _buf[0] != 0U,
         bridgeReservation)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->lock();
     #endif
     _coils[address] = (value == 0xFF00);
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool bridgeQueued = isLocal ||
         bridgeCommitCoilIngress(bridgeReservation);
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->unlock();
     #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     if(!bridgeQueued){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
@@ -895,7 +886,7 @@ void ModbusRTUSlave::_processWriteSingleCoil() {
       bridgeNotifyLocalWrite(address, 1, true);
     }
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(5U, 1U);
 #endif
     _writeResponse(6);
@@ -908,33 +899,33 @@ void ModbusRTUSlave::_processWriteSingleHoldingRegister() {
   if (!_holdingRegisters || _numHoldingRegisters == 0) _exceptionResponse(1);
   else if (address >= _numHoldingRegisters) _exceptionResponse(2);
   else {
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool isLocal = bridgeIsLocalRange(address, 1, false);
-    uint16_t bridgeSessionGeneration = 0U;
+    uint16_t bridgeContext = 0U;
     BridgeIngressReservation bridgeReservation;
-    if(!bridgeWriteAllowed(address, 1, false, false, bridgeSessionGeneration)){
+    if(!bridgeWriteAllowed(address, 1, false, false, bridgeContext)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
     if(!isLocal && !bridgeReserveHoldingIngress(
-        address, 1, false, bridgeSessionGeneration, true,
+        address, 1, false, bridgeContext, _buf[0] != 0U,
         bridgeReservation)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->lock();
     #endif
     _holdingRegisters[address] = value;
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool bridgeQueued = isLocal ||
         bridgeCommitHoldingIngress(bridgeReservation);
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->unlock();
     #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     if(!bridgeQueued){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
@@ -943,7 +934,7 @@ void ModbusRTUSlave::_processWriteSingleHoldingRegister() {
       bridgeNotifyLocalWrite(address, 1, false);
     }
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(6U, 1U);
 #endif
     _writeResponse(6);
@@ -957,35 +948,35 @@ void ModbusRTUSlave::_processWriteMultipleCoils() {
   else if (quantity == 0 || quantity > 1968 || _buf[6] != _div8RndUp(quantity)) _exceptionResponse(3);
   else if (quantity > _numCoils || startAddress > (_numCoils - quantity)) _exceptionResponse(2);
   else {
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool isLocal = bridgeIsLocalRange(startAddress, quantity, true);
-    uint16_t bridgeSessionGeneration = 0U;
+    uint16_t bridgeContext = 0U;
     BridgeIngressReservation bridgeReservation;
-    if(!bridgeWriteAllowed(startAddress, quantity, true, false, bridgeSessionGeneration)){
+    if(!bridgeWriteAllowed(startAddress, quantity, true, false, bridgeContext)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
     if(!isLocal && !bridgeReserveCoilIngress(
-        startAddress, quantity, false, bridgeSessionGeneration,
-        !(startAddress == 0U && quantity == 1U), bridgeReservation)){
+        startAddress, quantity, false, bridgeContext,
+        _buf[0] != 0U, bridgeReservation)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; i++) {
       _coils[startAddress + i] = bitRead(_buf[7 + (i >> 3)], i & 7);
     }
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool bridgeQueued = isLocal ||
         bridgeCommitCoilIngress(bridgeReservation);
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_coilMut) _coilMut->unlock();
     #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     if(!bridgeQueued){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
@@ -994,7 +985,7 @@ void ModbusRTUSlave::_processWriteMultipleCoils() {
       bridgeNotifyLocalWrite(startAddress, quantity, true);
     }
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(15U, quantity);
 #endif
     _writeResponse(6);
@@ -1008,35 +999,35 @@ void ModbusRTUSlave::_processWriteMultipleHoldingRegisters() {
   else if (quantity == 0 || quantity > 123 || _buf[6] != (quantity * 2)) _exceptionResponse(3);
   else if (quantity > _numHoldingRegisters || startAddress > (_numHoldingRegisters - quantity)) _exceptionResponse(2);
   else {
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool isLocal = bridgeIsLocalRange(startAddress, quantity, false);
-    uint16_t bridgeSessionGeneration = 0U;
+    uint16_t bridgeContext = 0U;
     BridgeIngressReservation bridgeReservation;
-    if(!bridgeWriteAllowed(startAddress, quantity, false, false, bridgeSessionGeneration)){
+    if(!bridgeWriteAllowed(startAddress, quantity, false, false, bridgeContext)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
     if(!isLocal && !bridgeReserveHoldingIngress(
-        startAddress, quantity, false, bridgeSessionGeneration, true,
+        startAddress, quantity, false, bridgeContext, _buf[0] != 0U,
         bridgeReservation)){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->lock();
     #endif
     for (uint16_t i = 0; i < quantity; i++) {
       _holdingRegisters[startAddress + i] = _bytesToWord(_buf[i * 2 + 7], _buf[i * 2 + 8]);
     }
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     const bool bridgeQueued = isLocal ||
         bridgeCommitHoldingIngress(bridgeReservation);
 #endif
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     if(_hrMut) _hrMut->unlock();
     #endif
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     if(!bridgeQueued){
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
@@ -1045,7 +1036,7 @@ void ModbusRTUSlave::_processWriteMultipleHoldingRegisters() {
       bridgeNotifyLocalWrite(startAddress, quantity, false);
     }
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(16U, quantity);
 #endif
     _writeResponse(6);
@@ -1069,11 +1060,11 @@ bool ModbusRTUSlave::_readRequest() {
     if (!_rxInFrame) { _rxInFrame = true; _rxNumBytes = 0; }
     _buf[_rxNumBytes++] = b;
     _rxLastByteUs = micros();
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     dbg_.last_byte_us = _rxLastByteUs;
 #endif
   }
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   if (_serial->available() && _rxNumBytes >= MODBUS_RTU_SLAVE_BUF_SIZE) {
     ++dbg_.rx_overflows;
   }
@@ -1092,11 +1083,11 @@ bool ModbusRTUSlave::_readRequest() {
     const bool ok = (_crc(_rxNumBytes - 2) ==
                      _bytesToWord(_buf[_rxNumBytes - 1], _buf[_rxNumBytes - 2]));
     if (ok) _rxLen = _rxNumBytes; 
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     if (_rxNumBytes > dbg_.max_rx_len) dbg_.max_rx_len = _rxNumBytes;
 #endif
     _rxNumBytes = 0;
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     if (ok) {
       dbg_.last_frame_us = micros();
       ++dbg_.frames_ok;
@@ -1112,25 +1103,15 @@ bool ModbusRTUSlave::_readRequest() {
       ++dbg_.frames_bad;
     }
 #endif
-#ifdef USING_STATS
-    if(!ok){
-      PinTypes_slave::SlaveStats::recordError(PinTypes_slave::SlaveStats::kErrCodeCrcMismatch);
-    }
-#endif
     return ok;
   }
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   if (_rxNumBytes >= 4 && !addressed) {
     ++dbg_.not_addressed;
     dbg_.last_not_addr_id = _buf[0];
   }
 #endif
-#ifdef USING_STATS
-  if(_rxNumBytes && addressed){
-    PinTypes_slave::SlaveStats::recordError(PinTypes_slave::SlaveStats::kErrCodeBadFrame);
-  }
-#endif
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   if (_rxNumBytes > 0 && _rxNumBytes < 4 && addressed) {
     ++dbg_.short_frames;
   }
@@ -1141,7 +1122,7 @@ bool ModbusRTUSlave::_readRequest() {
 
 void ModbusRTUSlave::_writeResponse(uint8_t len){
   if (_buf[0] == 0) return;                     // no reply on broadcast
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED || defined(USB_DEBUG)
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED || defined(MBUS_RTU_SLAVE_DIAGNOSTICS)
   const uint32_t queuedAtUs = micros();
 #endif
   uint16_t crc = _crc(len);
@@ -1149,10 +1130,10 @@ void ModbusRTUSlave::_writeResponse(uint8_t len){
   if (_dePin != NO_DE_PIN) digitalWrite(_dePin, HIGH);
   _serial->write(_buf, len+2);
   _txBusy = true; _txLen = len+2;
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
   bridgeUpstreamTxDiagNoteQueued(queuedAtUs);
 #endif
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   ++dbg_.tx_count;
   const uint32_t now_us = queuedAtUs;
   dbg_.last_tx_us = now_us;
@@ -1172,7 +1153,7 @@ void ModbusRTUSlave::tx_pump(){
   if (!_txWasBusy) {
     _txWasBusy   = true;
     _txStartUs = micros();
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNotePumpSeen(_txStartUs);
 #endif
     uint32_t charUs;
@@ -1193,13 +1174,13 @@ void ModbusRTUSlave::tx_pump(){
   #endif
   if (_dePin != NO_DE_PIN) digitalWrite(_dePin, LOW);
   _txBusy = false;
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED || defined(USB_DEBUG)
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED || defined(MBUS_RTU_SLAVE_DIAGNOSTICS)
   const uint32_t txDoneUs = micros();
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
   bridgeUpstreamTxDiagNoteTxDone(txDoneUs);
 #endif
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   dbg_.last_tx_done_us = txDoneUs;
   dbg_.last_tx_busy_us = dbg_.last_tx_done_us - _txStartUs;
   if (dbg_.last_tx_busy_us > dbg_.max_tx_busy_us) {
@@ -1207,12 +1188,12 @@ void ModbusRTUSlave::tx_pump(){
   }
 #endif
 
-  #ifdef MODBUS_PURGE_RX_AFTER_TX
+  #ifdef MBUS_RTU_SLAVE_PURGE_RX_AFTER_TX
     while (_serial->available()) _serial->read();
   #endif
 }
 
-#ifdef OGM_MODBUS_MT_ACCESSORS
+#ifdef MBUS_RTU_SLAVE_WORK_ACCESSORS
 ModbusRTUSlave::WorkState ModbusRTUSlave::workState() const {
   WorkState s{};
   if (_rxInFrame) s.flags |= 0x01;
@@ -1234,9 +1215,6 @@ void ModbusRTUSlave::_exceptionResponse(uint8_t code) {
   _buf[1] |= 0x80;
   _buf[2] = code;
   _writeResponse(3);
-#ifdef USING_STATS
-  PinTypes_slave::SlaveStats::recordError(code);
-#endif
 }
 
 void ModbusRTUSlave::_clearRxBuffer() {
@@ -1284,60 +1262,60 @@ uint16_t ModbusRTUSlave::_bytesToWord(uint8_t high, uint8_t low) {
   return (static_cast<uint16_t>(high) << 8) | static_cast<uint16_t>(low);
 }
 
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
 // Firmware is otherwise built for size. The extracted journal adds fixed
 // adapter work to every forwarded write, so keep only its producer/consumer
 // seams at GCC's speed-optimised level. Native -Os A/B gates cover all three
 // write shapes; unsupported compilers retain the same semantics at their
 // ordinary optimisation level.
 #if defined(__GNUC__) && !defined(__clang__)
-#define OGM_MODBUS_BRIDGE_SPEED_OPT __attribute__((optimize("O2")))
+#define MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT __attribute__((optimize("O2")))
 #else
-#define OGM_MODBUS_BRIDGE_SPEED_OPT
+#define MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 #endif
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 bool ModbusRTUSlave::bridgeReserveCoilIngress(
     uint16_t start, uint16_t count, bool ff,
-    uint16_t sessionGeneration, bool publicDebt,
+    uint16_t context, bool responseRequired,
     BridgeIngressReservation& reservation){
-  const uint8_t meta = static_cast<uint8_t>(
-      (ff ? kBridgePendingFlagFireForget : 0U) |
-      (publicDebt ? kBridgePendingFlagPublicDebt : 0U));
+  const uint8_t attributes = static_cast<uint8_t>(
+      (ff ? kBridgeIngressFlagFireForget : 0U) |
+      (responseRequired ? kBridgeIngressFlagResponseRequired : 0U));
   bool reserved = false;
   {
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
     LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
     reserved = _bridgeSourceJournal.reserve(
-        BridgeIngressTable::Coils, start, count, sessionGeneration, 1U, meta,
+        BridgeIngressTable::Coils, start, count, context, 1U, attributes,
         reservation);
   }
   if(reserved) return true;
   return bridgeReserveIngressFailure(
-      start, count, true, ff, sessionGeneration);
+      start, count, true, ff, context);
 }
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 bool ModbusRTUSlave::bridgeReserveHoldingIngress(
     uint16_t start, uint16_t count, bool ff,
-    uint16_t sessionGeneration, bool publicDebt,
+    uint16_t context, bool responseRequired,
     BridgeIngressReservation& reservation){
-  const uint8_t meta = static_cast<uint8_t>(
-      (ff ? kBridgePendingFlagFireForget : 0U) |
-      (publicDebt ? kBridgePendingFlagPublicDebt : 0U));
+  const uint8_t attributes = static_cast<uint8_t>(
+      (ff ? kBridgeIngressFlagFireForget : 0U) |
+      (responseRequired ? kBridgeIngressFlagResponseRequired : 0U));
   bool reserved = false;
   {
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
     LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
     reserved = _bridgeSourceJournal.reserve(
         BridgeIngressTable::HoldingRegisters, start, count,
-        sessionGeneration, 1U, meta, reservation);
+        context, 1U, attributes, reservation);
   }
   if(reserved) return true;
   return bridgeReserveIngressFailure(
-      start, count, false, ff, sessionGeneration);
+      start, count, false, ff, context);
 }
 
 // Overflow diagnostics cannot run on a successful admission; keep this larger
@@ -1347,21 +1325,21 @@ __attribute__((noinline))
 #endif
 bool ModbusRTUSlave::bridgeReserveIngressFailure(
     uint16_t start, uint16_t count, bool isCoil, bool ff,
-    uint16_t sessionGeneration){
+    uint16_t context){
   // Pre-response saturation is diagnostic only. The exception proves the
   // write was rejected, so this record must carry no public ACK/FAIL debt.
-  const uint16_t ops = bridgeOpsForCount(count, isCoil);
-  bridgeOverflowPush(isCoil, start, count, ops, kBridgeDropReasonOverflow,
-                     ff, sessionGeneration);
+  const uint16_t units = bridgeUnitsForCount(count, isCoil);
+  bridgeOverflowPush(isCoil, start, count, units, kBridgeDropReasonOverflow,
+                     ff, context);
   return false;
 }
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 bool ModbusRTUSlave::bridgeCommitCoilIngress(
     const BridgeIngressReservation& reservation){
   bool committed = false;
   {
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
     LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
     committed = _bridgeSourceJournal.publishCoils(
@@ -1371,12 +1349,12 @@ bool ModbusRTUSlave::bridgeCommitCoilIngress(
   return bridgeCommitIngressFailure(reservation, true);
 }
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 bool ModbusRTUSlave::bridgeCommitHoldingIngress(
     const BridgeIngressReservation& reservation){
   bool committed = false;
   {
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
     LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
     committed = _bridgeSourceJournal.publishHolding(
@@ -1393,61 +1371,44 @@ __attribute__((noinline))
 bool ModbusRTUSlave::bridgeCommitIngressFailure(
     const BridgeIngressReservation& reservation, bool isCoil){
   // A reservation can only become stale if the single-producer contract was
-  // violated. Preserve the legacy failure accounting and never emit an ACK for
-  // a mutation that was not durably journalled.
+  // violated. Record the failure and never emit an ACK for a mutation that was
+  // not durably journalled.
   const bool ff =
-      (reservation.attributes() & kBridgePendingFlagFireForget) != 0U;
+      (reservation.attributes() & kBridgeIngressFlagFireForget) != 0U;
   bridgeOverflowPush(isCoil, reservation.start(), reservation.count(),
-                     bridgeOpsForCount(reservation.count(), isCoil),
+                     bridgeUnitsForCount(reservation.count(), isCoil),
                      kBridgeDropReasonOverflow, ff,
                      reservation.context());
   return false;
 }
 
 bool ModbusRTUSlave::bridgeWriteAllowed(uint16_t start, uint16_t count, bool isCoil, bool ff,
-                                        uint16_t& sessionGeneration){
-  sessionGeneration = 0U;
+                                        uint16_t& context){
+  context = 0U;
   if(bridgeIsLocalRange(start, count, isCoil)) return true;
   if(_bridgeAdmissionFn){
     const bool admitted = _bridgeAdmissionFn(
-        start, count, isCoil, ff, sessionGeneration);
+        start, count, isCoil, ff, context);
     if(admitted){
       return true;
     }
-    bridgeOverflowPush(isCoil, start, count, bridgeOpsForCount(count, isCoil),
-                       kBridgeDropReasonInactive, ff,
-                       sessionGeneration);
+    bridgeOverflowPush(isCoil, start, count, bridgeUnitsForCount(count, isCoil),
+                       kBridgeDropReasonAdmissionRejected, ff, context);
     return false;
   }
-  // Bridge-active coil is always at position 0.
-  if(!_coils || _numCoils == 0) return true;
-  const bool active = _coils[0];
-  if(active){
-    sessionGeneration = 1U;
-    return true;
-  }
-  if(isCoil && start == 0 && count == 1){
-    sessionGeneration = 1U;
-    return true; // allow toggling bridge_active while inactive
-  }
-  // Bridge is inactive: publish this range in the overflow/drop path with a
-  // dedicated reason so runtime always applies fail/health accounting, even if
-  // bridge_active flips before processing.
-  bridgeOverflowPush(isCoil, start, count, bridgeOpsForCount(count, isCoil),
-                     kBridgeDropReasonInactive, ff, sessionGeneration);
-  return false;
+  return true;
 }
 
-bool ModbusRTUSlave::bridgePeekCoils(BridgePending& pending) const{
-#ifdef OGM_USE_MUTEX
+bool ModbusRTUSlave::bridgePeekCoils(BridgeIngressEntry& pending) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   return _bridgeSourceJournal.peek(BridgeIngressTable::Coils, pending);
 }
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
-bool ModbusRTUSlave::bridgePeekNext(BridgePending& pending, bool& isCoil) const{
-#ifdef OGM_USE_MUTEX
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
+bool ModbusRTUSlave::bridgePeekNext(BridgeIngressEntry& pending, bool& isCoil) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   BridgeIngressTable table = BridgeIngressTable::Coils;
@@ -1456,9 +1417,9 @@ bool ModbusRTUSlave::bridgePeekNext(BridgePending& pending, bool& isCoil) const{
   return true;
 }
 
-OGM_MODBUS_BRIDGE_SPEED_OPT
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 bool ModbusRTUSlave::bridgeCommitNext(bool isCoil, uint16_t sourceToken){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   return _bridgeSourceJournal.retire(
@@ -1468,14 +1429,14 @@ bool ModbusRTUSlave::bridgeCommitNext(bool isCoil, uint16_t sourceToken){
 }
 
 bool ModbusRTUSlave::bridgeCommitCoils(uint16_t sourceToken){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   return _bridgeSourceJournal.retire(BridgeIngressTable::Coils, sourceToken);
 }
 
-bool ModbusRTUSlave::bridgePeekHolding(BridgePending& pending) const{
-#ifdef OGM_USE_MUTEX
+bool ModbusRTUSlave::bridgePeekHolding(BridgeIngressEntry& pending) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   return _bridgeSourceJournal.peek(
@@ -1483,15 +1444,15 @@ bool ModbusRTUSlave::bridgePeekHolding(BridgePending& pending) const{
 }
 
 bool ModbusRTUSlave::bridgeCommitHolding(uint16_t sourceToken){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   return _bridgeSourceJournal.retire(
       BridgeIngressTable::HoldingRegisters, sourceToken);
 }
 
-bool ModbusRTUSlave::bridgePeekOverflowCoils(BridgePending& pending) const{
-#ifdef OGM_USE_MUTEX
+bool ModbusRTUSlave::bridgePeekOverflowCoils(BridgeIngressEntry& pending) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
   const uint8_t curHead = _bridgeOverflowCoilHead;
@@ -1501,7 +1462,7 @@ bool ModbusRTUSlave::bridgePeekOverflowCoils(BridgePending& pending) const{
 }
 
 bool ModbusRTUSlave::bridgeCommitOverflowCoils(uint16_t sourceToken){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
   const uint8_t curHead = _bridgeOverflowCoilHead;
@@ -1514,8 +1475,8 @@ bool ModbusRTUSlave::bridgeCommitOverflowCoils(uint16_t sourceToken){
   return true;
 }
 
-bool ModbusRTUSlave::bridgePeekOverflowHolding(BridgePending& pending) const{
-#ifdef OGM_USE_MUTEX
+bool ModbusRTUSlave::bridgePeekOverflowHolding(BridgeIngressEntry& pending) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
   const uint8_t curHead = _bridgeOverflowHrHead;
@@ -1525,7 +1486,7 @@ bool ModbusRTUSlave::bridgePeekOverflowHolding(BridgePending& pending) const{
 }
 
 bool ModbusRTUSlave::bridgeCommitOverflowHolding(uint16_t sourceToken){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
   const uint8_t curHead = _bridgeOverflowHrHead;
@@ -1538,18 +1499,18 @@ bool ModbusRTUSlave::bridgeCommitOverflowHolding(uint16_t sourceToken){
   return true;
 }
 
-#undef OGM_MODBUS_BRIDGE_SPEED_OPT
+#undef MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 #endif
 
 /**
  * TODO: expose for all writable slave types, so this can be polled instead of looping over all
  * pins
  */
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
 bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
                                         uint8_t& snapshotCount, bool snapshot[]){
-  BridgePending pending;
-#ifdef OGM_USE_MUTEX
+  BridgeIngressEntry pending;
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   if(!_bridgeSourceJournal.peek(BridgeIngressTable::Coils, pending) ||
@@ -1559,8 +1520,8 @@ bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16
   }
   start = pending.start;
   count = pending.count;
-  ops = pending.ops ? static_cast<uint16_t>(pending.ops) : uint16_t(1U);
-  ff = (pending.meta & kBridgePendingFlagFireForget) != 0U;
+  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
+  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
   snapshotCount = pending.snapshotCount;
   if(snapshot && snapshotCount != 0U){
     memcpy(snapshot, pending.snapshot.coils,
@@ -1581,8 +1542,8 @@ bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16
 
 bool ModbusRTUSlave::bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
                                           uint8_t& snapshotCount, uint16_t snapshot[]){
-  BridgePending pending;
-#ifdef OGM_USE_MUTEX
+  BridgeIngressEntry pending;
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
   if(!_bridgeSourceJournal.peek(
@@ -1593,8 +1554,8 @@ bool ModbusRTUSlave::bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint
   }
   start = pending.start;
   count = pending.count;
-  ops = pending.ops ? static_cast<uint16_t>(pending.ops) : uint16_t(1U);
-  ff = (pending.meta & kBridgePendingFlagFireForget) != 0U;
+  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
+  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
   snapshotCount = pending.snapshotCount;
   if(snapshot && snapshotCount != 0U){
     memcpy(snapshot, pending.snapshot.holding,
@@ -1647,21 +1608,22 @@ bool ModbusRTUSlave::bridgeConsumeOverflow(){
   return bridgeConsumeOverflowCoils(s, c, o, r) || bridgeConsumeOverflowHolding(s, c, o, r);
 }
 
-uint16_t ModbusRTUSlave::bridgeOpsForCount(uint16_t count, bool isCoil) const{
-  // Keep opsCount aligned with master bridge ack/fail tracking; this mirrors
-  // the downstream chunking implied by MAX_MULTI_*.
-  static_assert(PinIndexDefines::MAX_MULTI_COILS > 0, "MAX_MULTI_COILS must be > 0 for ops accounting");
-  static_assert(PinIndexDefines::MAX_MULTI_HRS > 0, "MAX_MULTI_HRS must be > 0 for ops accounting");
+uint16_t ModbusRTUSlave::bridgeUnitsForCount(uint16_t count, bool isCoil) const{
+  // Each journal entry carries one snapshot chunk. The work-unit count tells a
+  // consumer how many chunks the original Modbus write produced.
   constexpr uint16_t kMaxBridgeWriteCoils = 1968;
   constexpr uint16_t kMaxBridgeWriteHrs = 123;
   constexpr uint16_t kMaxCoilOps = static_cast<uint16_t>(
-      (kMaxBridgeWriteCoils + (PinIndexDefines::MAX_MULTI_COILS - 1u)) /
-      PinIndexDefines::MAX_MULTI_COILS);
+      (kMaxBridgeWriteCoils + (MBUS_RTU_SLAVE_BRIDGE_MAX_COILS - 1u)) /
+      MBUS_RTU_SLAVE_BRIDGE_MAX_COILS);
   constexpr uint16_t kMaxHrOps = static_cast<uint16_t>(
-      (kMaxBridgeWriteHrs + (PinIndexDefines::MAX_MULTI_HRS - 1u)) /
-      PinIndexDefines::MAX_MULTI_HRS);
-  static_assert(kMaxCoilOps <= 0xFFu, "BridgePending::ops no longer fits coil write op count");
-  static_assert(kMaxHrOps <= 0xFFu, "BridgePending::ops no longer fits holding write op count");
+      (kMaxBridgeWriteHrs +
+       (MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS - 1u)) /
+      MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS);
+  static_assert(kMaxCoilOps <= 0xFFu,
+                "coil work-unit count must fit BridgeIngressEntry::units");
+  static_assert(kMaxHrOps <= 0xFFu,
+                "holding work-unit count must fit BridgeIngressEntry::units");
   return BridgeIngressJournal::operationCount(
       isCoil ? BridgeIngressTable::Coils
              : BridgeIngressTable::HoldingRegisters,
@@ -1669,24 +1631,16 @@ uint16_t ModbusRTUSlave::bridgeOpsForCount(uint16_t count, bool isCoil) const{
 }
 
 void ModbusRTUSlave::bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count,
-                                        uint16_t ops, uint8_t reason, bool ff,
-                                        uint16_t sessionGeneration){
-#ifdef USING_STATS
-  if(reason == kBridgeDropReasonInactive){
-    PinTypes_slave::SlaveStats::recordError(PinTypes_slave::SlaveStats::kErrCodeBridgeInactive);
-  }else{
-    PinTypes_slave::SlaveStats::recordError(PinTypes_slave::SlaveStats::kErrCodeBridgeOverflow);
-    PinTypes_slave::SlaveStats::recordOverflow(ops ? ops : uint16_t(1));
-  }
-#endif
-#ifdef OGM_USE_MUTEX
+                                        uint16_t units, uint8_t reason, bool ff,
+                                        uint16_t context){
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
-  BridgePending* q = isCoil ? _bridgeOverflowCoilQ : _bridgeOverflowHrQ;
+  BridgeIngressEntry* q = isCoil ? _bridgeOverflowCoilQ : _bridgeOverflowHrQ;
   volatile uint8_t& head = isCoil ? _bridgeOverflowCoilHead : _bridgeOverflowHrHead;
   volatile uint8_t& tail = isCoil ? _bridgeOverflowCoilTail : _bridgeOverflowHrTail;
   const uint8_t size = kBridgeOverflowQueueSize;
-  const uint16_t normalizedOps = ops ? ops : uint16_t(1);
+  const uint16_t normalizedUnits = units ? units : uint16_t(1);
 
   uint8_t curHead = head;
   const uint8_t curTail = tail;
@@ -1700,36 +1654,36 @@ void ModbusRTUSlave::bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t co
 
   q[curTail].start = start;
   q[curTail].count = count;
-  q[curTail].sessionGeneration = sessionGeneration;
+  q[curTail].context = context;
   uint16_t token = static_cast<uint16_t>(_bridgeOverflowToken + 1U);
   if(token == 0U) token = 1U;
   _bridgeOverflowToken = token;
   q[curTail].sourceToken = token;
-  q[curTail].ops = static_cast<uint8_t>(normalizedOps);
-  q[curTail].meta = static_cast<uint8_t>(
-      (ff ? kBridgePendingFlagFireForget : 0U) |
-      (reason & kBridgePendingReasonMask));
+  q[curTail].units = static_cast<uint8_t>(normalizedUnits);
+  q[curTail].attributes = static_cast<uint8_t>(
+      (ff ? kBridgeIngressFlagFireForget : 0U) |
+      (reason & kBridgeIngressReasonMask));
   q[curTail].snapshotCount = 0U;
   head = curHead;
   tail = nextTail;
 }
 
 bool ModbusRTUSlave::bridgeOverflowDequeue(bool isCoil, uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff){
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
-  BridgePending* q = isCoil ? _bridgeOverflowCoilQ : _bridgeOverflowHrQ;
+  BridgeIngressEntry* q = isCoil ? _bridgeOverflowCoilQ : _bridgeOverflowHrQ;
   volatile uint8_t& head = isCoil ? _bridgeOverflowCoilHead : _bridgeOverflowHrHead;
   volatile uint8_t& tail = isCoil ? _bridgeOverflowCoilTail : _bridgeOverflowHrTail;
   uint8_t curHead = head;
   const uint8_t curTail = tail;
   if(curHead == curTail) return false;
-  const BridgePending& pending = q[curHead];
+  const BridgeIngressEntry& pending = q[curHead];
   start = pending.start;
   count = pending.count;
-  ops = pending.ops ? static_cast<uint16_t>(pending.ops) : uint16_t(1U);
-  reason = static_cast<uint8_t>(pending.meta & kBridgePendingReasonMask);
-  ff = (pending.meta & kBridgePendingFlagFireForget) != 0U;
+  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
+  reason = static_cast<uint8_t>(pending.attributes & kBridgeIngressReasonMask);
+  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
   curHead = static_cast<uint8_t>(
       (curHead + 1U) % kBridgeOverflowQueueSize);
   head = curHead;

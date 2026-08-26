@@ -10,55 +10,52 @@ usage() {
 parse_measurement() {
   local label=$1
   local output=$2
-  local perf_line legacy_line
-  local format=legacy
-  local idle_total=0 idle_ops=0 request_total=0 request_ops=0
-  local idle_per_op= request_per_op=
+  local local_line forwarded_line
 
-  perf_line=$(printf '%s\n' "$output" | sed -n '/^modbus_perf: /p' | tail -n 1)
-  if [[ -n "$perf_line" ]]; then
-    if [[ "$perf_line" =~ idle_median_ns=([0-9]+)[[:space:]]+idle_ops=([0-9]+)[[:space:]]+request_median_ns=([0-9]+)[[:space:]]+request_ops=([0-9]+) ]]; then
-      format=raw
-      idle_total=${BASH_REMATCH[1]}
-      idle_ops=${BASH_REMATCH[2]}
-      request_total=${BASH_REMATCH[3]}
-      request_ops=${BASH_REMATCH[4]}
-    else
-      echo "$label emitted a malformed modbus_perf line" >&2
-      return 2
-    fi
-    if (( idle_ops == 0 || request_ops == 0 )); then
-      echo "$label emitted zero operation count in modbus_perf output" >&2
-      return 2
-    fi
-  fi
+  local_line=$(printf '%s\n' "$output" | sed -n '/^modbus_perf: /p' | tail -n 1)
+  forwarded_line=$(printf '%s\n' "$output" | sed -n '/^modbus_forwarded_perf: /p' | tail -n 1)
 
-  legacy_line=$(printf '%s\n' "$output" | sed -n '/^characterization: /p' | tail -n 1)
-  if [[ "$legacy_line" =~ idle=([0-9]+)ns/op[[:space:]]+requests=([0-9]+)ns/op ]]; then
-    idle_per_op=${BASH_REMATCH[1]}
-    request_per_op=${BASH_REMATCH[2]}
-  elif [[ "$format" == raw ]]; then
-    # Raw-only future programs can still participate in a mixed-format
-    # comparison. Match the legacy executable's integer truncation.
-    idle_per_op=$((idle_total / idle_ops))
-    request_per_op=$((request_total / request_ops))
-  else
-    echo "$label emitted neither modbus_perf nor characterization performance output" >&2
+  if [[ ! "$local_line" =~ idle_median_ns=([0-9]+)[[:space:]]+idle_ops=([0-9]+)[[:space:]]+request_median_ns=([0-9]+)[[:space:]]+request_ops=([0-9]+) ]]; then
+    echo "$label emitted a missing or malformed modbus_perf line" >&2
     return 2
   fi
+  local idle_total=${BASH_REMATCH[1]}
+  local idle_ops=${BASH_REMATCH[2]}
+  local request_total=${BASH_REMATCH[3]}
+  local request_ops=${BASH_REMATCH[4]}
 
-  printf '%s %s %s %s %s %s %s\n' \
-    "$format" "$idle_total" "$idle_ops" "$request_total" "$request_ops" \
-    "$idle_per_op" "$request_per_op"
+  if [[ ! "$forwarded_line" =~ forwarded_median_ns=([0-9]+)[[:space:]]+forwarded_ops=([0-9]+)[[:space:]]+max_median_ns=([0-9]+)[[:space:]]+max_ops=([0-9]+)[[:space:]]+multichunk_median_ns=([0-9]+)[[:space:]]+multichunk_ops=([0-9]+) ]]; then
+    echo "$label emitted a missing or malformed modbus_forwarded_perf line" >&2
+    return 2
+  fi
+  local forwarded_total=${BASH_REMATCH[1]}
+  local forwarded_ops=${BASH_REMATCH[2]}
+  local maximum_total=${BASH_REMATCH[3]}
+  local maximum_ops=${BASH_REMATCH[4]}
+  local multichunk_total=${BASH_REMATCH[5]}
+  local multichunk_ops=${BASH_REMATCH[6]}
+
+  local operation_count
+  for operation_count in "$idle_ops" "$request_ops" "$forwarded_ops" \
+      "$maximum_ops" "$multichunk_ops"; do
+    if (( operation_count == 0 )); then
+      echo "$label emitted a zero operation count" >&2
+      return 2
+    fi
+  done
+
+  printf '%s %s %s %s %s %s %s %s %s %s\n' \
+    "$idle_total" "$idle_ops" "$request_total" "$request_ops" \
+    "$forwarded_total" "$forwarded_ops" "$maximum_total" "$maximum_ops" \
+    "$multichunk_total" "$multichunk_ops"
 }
 
 measure() {
   local label=$1
   local program=$2
-  local output parsed
-  local status
+  local output status parsed
   set +e
-  output=$(env -u OGM_STRICT_MODBUS_PERF "$program" 2>&1)
+  output=$(env -u MBUS_RTU_SLAVE_STRICT_PERFORMANCE "$program" 2>&1)
   status=$?
   set -e
   if (( status != 0 )); then
@@ -66,273 +63,120 @@ measure() {
     echo "$output" >&2
     return "$status"
   fi
-
   if ! parsed=$(parse_measurement "$label" "$output"); then
-    echo "$label did not emit parseable Modbus performance output" >&2
     echo "$output" >&2
     return 2
   fi
   printf '%s\n' "$parsed"
 }
 
-comparison_mode() {
-  local baseline_format=$1
-  local candidate_format=$2
-  if [[ "$baseline_format" == raw && "$candidate_format" == raw ]]; then
-    printf 'raw\n'
-  else
-    printf 'legacy\n'
-  fi
-}
-
-raw_counts_match() {
-  [[ "$1" == "$3" && "$2" == "$4" ]]
-}
-
-median() {
-  local position=$((($# + 1) / 2))
-  printf '%s\n' "$@" | sort -n | sed -n "${position}p"
-}
-
-report_raw_ratio() {
-  local name=$1
-  local baseline=$2
-  local candidate=$3
-  awk -v name="$name" -v baseline="$baseline" -v candidate="$candidate" \
-    'BEGIN {
-       delta = ((candidate / baseline) - 1.0) * 100.0;
-       printf "%s: baseline_total=%dns candidate_total=%dns delta=%+.2f%%\n",
-              name, baseline, candidate, delta;
-     }'
-}
-
-report_legacy_ratio() {
-  local name=$1
-  local baseline=$2
-  local candidate=$3
-  awk -v name="$name" -v baseline="$baseline" -v candidate="$candidate" \
-    'BEGIN {
-       delta = ((candidate / baseline) - 1.0) * 100.0;
-       printf "%s: baseline=%dns/op candidate=%dns/op delta=%+.2f%%\n",
-              name, baseline, candidate, delta;
-     }'
-}
-
 assert_equal() {
-  local expected=$1
-  local actual=$2
-  local label=$3
-  if [[ "$actual" != "$expected" ]]; then
-    echo "self-test failed ($label): expected '$expected', got '$actual'" >&2
+  if [[ "$2" != "$1" ]]; then
+    echo "self-test failed ($3): expected '$1', got '$2'" >&2
     exit 1
   fi
 }
 
 run_self_test() {
-  local raw_both legacy_only raw_only parsed
-  raw_both=$'noise\nmodbus_perf: idle_median_ns=165 idle_ops=10 request_median_ns=6655 request_ops=10\ncharacterization: idle=16ns/op requests=665ns/op object=1B pending=1B'
-  legacy_only='characterization: idle=17ns/op requests=681ns/op object=1B pending=1B'
-  raw_only='modbus_perf: idle_median_ns=199 idle_ops=10 request_median_ns=7019 request_ops=10'
-
-  parsed=$(parse_measurement raw-both "$raw_both")
-  assert_equal 'raw 165 10 6655 10 16 665' "$parsed" 'raw plus legacy parse'
-  parsed=$(parse_measurement legacy-only "$legacy_only")
-  assert_equal 'legacy 0 0 0 0 17 681' "$parsed" 'legacy parse'
-  parsed=$(parse_measurement raw-only "$raw_only")
-  assert_equal 'raw 199 10 7019 10 19 701' "$parsed" 'raw-only legacy derivation'
-  assert_equal raw "$(comparison_mode raw raw)" 'raw mode selection'
-  assert_equal legacy "$(comparison_mode legacy raw)" 'mixed mode selection'
-  assert_equal legacy "$(comparison_mode raw legacy)" 'reverse mixed mode selection'
-  if ! raw_counts_match 10 20 10 20; then
-    echo 'self-test failed: equal raw operation counts were rejected' >&2
-    exit 1
-  fi
-  if raw_counts_match 10 20 11 20; then
-    echo 'self-test failed: unequal raw operation counts were accepted' >&2
-    exit 1
-  fi
+  local sample parsed
+  sample=$'noise\nmodbus_perf: idle_median_ns=165 idle_ops=10 request_median_ns=6655 request_ops=20\nmodbus_forwarded_perf: forwarded_median_ns=7000 forwarded_ops=30 max_median_ns=8000 max_ops=40 multichunk_median_ns=9000 multichunk_ops=50'
+  parsed=$(parse_measurement self-test "$sample")
+  assert_equal '165 10 6655 20 7000 30 8000 40 9000 50' "$parsed" parse
   if parse_measurement malformed 'no performance output' >/dev/null 2>&1; then
     echo 'self-test failed: malformed output was accepted' >&2
-    exit 1
-  fi
-  if parse_measurement malformed-raw \
-      $'modbus_perf: malformed\ncharacterization: idle=17ns/op requests=681ns/op' \
-      >/dev/null 2>&1; then
-    echo 'self-test failed: malformed raw output silently fell back to legacy' >&2
     exit 1
   fi
   echo 'compare_modbus_native_perf self-test: PASS'
 }
 
 if [[ ${1:-} == --self-test ]]; then
-  if [[ $# -ne 1 ]]; then
-    usage
-    exit 2
-  fi
+  [[ $# -eq 1 ]] || { usage; exit 2; }
   run_self_test
   exit 0
 fi
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
-  usage
-  exit 2
-fi
-
+[[ $# -ge 2 && $# -le 3 ]] || { usage; exit 2; }
 baseline_program=$1
 candidate_program=$2
 sample_count=${3:-7}
-max_regression_pct=${OGM_MODBUS_PERF_MAX_REGRESSION_PCT:-5}
+max_regression_pct=${MBUS_RTU_SLAVE_MAX_REGRESSION_PCT:-5}
 
-if [[ ! -x "$baseline_program" ]]; then
-  echo "baseline program is not executable: $baseline_program" >&2
-  exit 2
-fi
-if [[ ! -x "$candidate_program" ]]; then
-  echo "candidate program is not executable: $candidate_program" >&2
-  exit 2
-fi
+[[ -x "$baseline_program" ]] || { echo "baseline program is not executable: $baseline_program" >&2; exit 2; }
+[[ -x "$candidate_program" ]] || { echo "candidate program is not executable: $candidate_program" >&2; exit 2; }
 if [[ ! "$sample_count" =~ ^[0-9]+$ ]] || (( sample_count < 3 || sample_count % 2 == 0 )); then
   echo "ODD_SAMPLE_COUNT must be an odd integer of at least 3" >&2
   exit 2
 fi
 if [[ ! "$max_regression_pct" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-  echo "OGM_MODBUS_PERF_MAX_REGRESSION_PCT must be a non-negative number" >&2
+  echo "MBUS_RTU_SLAVE_MAX_REGRESSION_PCT must be a non-negative number" >&2
   exit 2
 fi
 
-baseline_idle_raw=()
-baseline_request_raw=()
-candidate_idle_raw=()
-candidate_request_raw=()
-baseline_idle_legacy=()
-baseline_request_legacy=()
-candidate_idle_legacy=()
-candidate_request_legacy=()
-baseline_format=
-candidate_format=
-baseline_idle_ops=
-baseline_request_ops=
-candidate_idle_ops=
-candidate_request_ops=
-
-record_measurement() {
-  local label=$1
-  local program=$2
-  local measurement format idle_total idle_ops request_total request_ops
-  local idle_per_op request_per_op
-  measurement=$(measure "$label" "$program")
-  read -r format idle_total idle_ops request_total request_ops \
-    idle_per_op request_per_op <<<"$measurement"
-
-  if [[ "$label" == baseline ]]; then
-    if [[ -z "$baseline_format" ]]; then
-      baseline_format=$format
-    elif [[ "$format" != "$baseline_format" ]]; then
-      echo 'baseline output format changed between samples' >&2
-      exit 2
-    fi
-    if [[ "$format" == raw ]]; then
-      if [[ -z "$baseline_idle_ops" ]]; then
-        baseline_idle_ops=$idle_ops
-        baseline_request_ops=$request_ops
-      elif [[ "$idle_ops" != "$baseline_idle_ops" ||
-              "$request_ops" != "$baseline_request_ops" ]]; then
-        echo 'baseline raw operation counts changed between samples' >&2
-        exit 2
-      fi
-    fi
-    baseline_idle_raw+=("$idle_total")
-    baseline_request_raw+=("$request_total")
-    baseline_idle_legacy+=("$idle_per_op")
-    baseline_request_legacy+=("$request_per_op")
-  else
-    if [[ -z "$candidate_format" ]]; then
-      candidate_format=$format
-    elif [[ "$format" != "$candidate_format" ]]; then
-      echo 'candidate output format changed between samples' >&2
-      exit 2
-    fi
-    if [[ "$format" == raw ]]; then
-      if [[ -z "$candidate_idle_ops" ]]; then
-        candidate_idle_ops=$idle_ops
-        candidate_request_ops=$request_ops
-      elif [[ "$idle_ops" != "$candidate_idle_ops" ||
-              "$request_ops" != "$candidate_request_ops" ]]; then
-        echo 'candidate raw operation counts changed between samples' >&2
-        exit 2
-      fi
-    fi
-    candidate_idle_raw+=("$idle_total")
-    candidate_request_raw+=("$request_total")
-    candidate_idle_legacy+=("$idle_per_op")
-    candidate_request_legacy+=("$request_per_op")
-  fi
-}
-
+baseline_rows=()
+candidate_rows=()
 for ((sample = 0; sample < sample_count; ++sample)); do
   echo "performance pair $((sample + 1))/$sample_count" >&2
   if (( sample % 2 == 0 )); then
-    record_measurement baseline "$baseline_program"
-    record_measurement candidate "$candidate_program"
+    baseline_rows+=("$(measure baseline "$baseline_program")")
+    candidate_rows+=("$(measure candidate "$candidate_program")")
   else
-    record_measurement candidate "$candidate_program"
-    record_measurement baseline "$baseline_program"
+    candidate_rows+=("$(measure candidate "$candidate_program")")
+    baseline_rows+=("$(measure baseline "$baseline_program")")
   fi
 done
 
-mode=$(comparison_mode "$baseline_format" "$candidate_format")
-if [[ "$mode" == raw ]]; then
-  if ! raw_counts_match \
-      "$baseline_idle_ops" "$baseline_request_ops" \
-      "$candidate_idle_ops" "$candidate_request_ops"; then
-    echo 'raw operation counts differ between baseline and candidate executables' >&2
-    echo "baseline idle/request ops: $baseline_idle_ops/$baseline_request_ops" >&2
-    echo "candidate idle/request ops: $candidate_idle_ops/$candidate_request_ops" >&2
-    exit 2
-  fi
-  baseline_idle_median=$(median "${baseline_idle_raw[@]}")
-  baseline_request_median=$(median "${baseline_request_raw[@]}")
-  candidate_idle_median=$(median "${candidate_idle_raw[@]}")
-  candidate_request_median=$(median "${candidate_request_raw[@]}")
-else
-  echo 'WARNING: raw modbus_perf totals are not available from both executables.' >&2
-  echo 'Falling back to integer-truncated legacy ns/op summaries; sub-ns changes are quantized.' >&2
-  echo 'Operation counts are intentionally not compared because legacy output does not expose them.' >&2
-  baseline_idle_median=$(median "${baseline_idle_legacy[@]}")
-  baseline_request_median=$(median "${baseline_request_legacy[@]}")
-  candidate_idle_median=$(median "${candidate_idle_legacy[@]}")
-  candidate_request_median=$(median "${candidate_request_legacy[@]}")
-  if (( baseline_idle_median == 0 || baseline_request_median == 0 )); then
-    echo 'legacy baseline truncated to 0ns/op and cannot produce a meaningful ratio' >&2
-    exit 2
-  fi
-fi
-
-within_limit() {
-  local baseline=$1
-  local candidate=$2
-  awk -v baseline="$baseline" -v candidate="$candidate" \
-      -v limit="$max_regression_pct" \
-      'BEGIN { exit !(baseline > 0 && candidate * 100.0 <= baseline * (100.0 + limit)) }'
+value_at() {
+  local row=$1
+  local column=$2
+  local values
+  read -r -a values <<<"$row"
+  printf '%s\n' "${values[$column]}"
 }
 
-echo "same-host interleaved median comparison ($sample_count pairs, ${max_regression_pct}% limit, mode=$mode)"
-if [[ "$mode" == raw ]]; then
-  echo "raw operation counts: idle=$baseline_idle_ops request=$baseline_request_ops"
-  report_raw_ratio idle "$baseline_idle_median" "$candidate_idle_median"
-  report_raw_ratio request "$baseline_request_median" "$candidate_request_median"
-else
-  report_legacy_ratio idle "$baseline_idle_median" "$candidate_idle_median"
-  report_legacy_ratio request "$baseline_request_median" "$candidate_request_median"
-fi
+median_column() {
+  local column=$1
+  shift
+  local position=$((($# + 1) / 2))
+  local row
+  for row in "$@"; do value_at "$row" "$column"; done | \
+    sort -n | sed -n "${position}p"
+}
 
+within_limit() {
+  awk -v baseline="$1" -v candidate="$2" -v limit="$max_regression_pct" \
+    'BEGIN { exit !(baseline > 0 && candidate * 100.0 <= baseline * (100.0 + limit)) }'
+}
+
+lane_names=(idle request forwarded forwarded_max forwarded_multichunk)
 failed=0
-if ! within_limit "$baseline_idle_median" "$candidate_idle_median"; then
-  echo "idle poll regression exceeds ${max_regression_pct}%" >&2
-  failed=1
-fi
-if ! within_limit "$baseline_request_median" "$candidate_request_median"; then
-  echo "request/TX regression exceeds ${max_regression_pct}%" >&2
-  failed=1
-fi
+echo "same-host interleaved median comparison ($sample_count pairs, ${max_regression_pct}% limit)"
+for lane_index in "${!lane_names[@]}"; do
+  total_column=$((lane_index * 2))
+  ops_column=$((total_column + 1))
+  baseline_ops=$(value_at "${baseline_rows[0]}" "$ops_column")
+  candidate_ops=$(value_at "${candidate_rows[0]}" "$ops_column")
+  if [[ "$baseline_ops" != "$candidate_ops" ]]; then
+    echo "${lane_names[$lane_index]} operation counts differ: $baseline_ops vs $candidate_ops" >&2
+    exit 2
+  fi
+  for row in "${baseline_rows[@]}" "${candidate_rows[@]}"; do
+    if [[ $(value_at "$row" "$ops_column") != "$baseline_ops" ]]; then
+      echo "${lane_names[$lane_index]} operation count changed between samples" >&2
+      exit 2
+    fi
+  done
+  baseline_median=$(median_column "$total_column" "${baseline_rows[@]}")
+  candidate_median=$(median_column "$total_column" "${candidate_rows[@]}")
+  awk -v name="${lane_names[$lane_index]}" -v ops="$baseline_ops" \
+      -v baseline="$baseline_median" -v candidate="$candidate_median" \
+    'BEGIN {
+       delta = ((candidate / baseline) - 1.0) * 100.0;
+       printf "%s: ops=%d baseline_total=%dns candidate_total=%dns delta=%+.2f%%\n",
+              name, ops, baseline, candidate, delta;
+     }'
+  if ! within_limit "$baseline_median" "$candidate_median"; then
+    echo "${lane_names[$lane_index]} regression exceeds ${max_regression_pct}%" >&2
+    failed=1
+  fi
+done
 exit "$failed"

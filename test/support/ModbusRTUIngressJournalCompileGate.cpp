@@ -4,7 +4,7 @@
 
 // Compile-only fixture: unlike an include-only smoke test, this instantiates
 // and exercises the default journal's producer and consumer templates. The
-// migration gate builds it with strict host C++11 and the AVR toolchain.
+// validation gate builds it with strict host C++11 and the AVR toolchain.
 uint8_t exerciseModbusRTUIngressJournalCompileGate() {
   typedef ModbusRTU::FixedCapacityIngressJournal<4U, 3U, 5U> Journal;
   static_assert(

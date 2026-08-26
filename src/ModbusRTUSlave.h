@@ -17,90 +17,40 @@
 
 #include "Arduino.h"
 #include "detail/ModbusRTUIngressJournal.h"
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
 #include "platform/PlatformMutex.h"
 #endif
 //#ifdef __AVR__
 ////#include <SoftwareSerial.h>
 //#endif
 
-#ifdef OGM_BRIDGE_MODE
-#include "IO/ExternalPins/PinIndexDefines.h"
-// Preserve the existing bridge-facing names while moving the queue mechanism
-// behind a product-neutral, allocation-free public API. PinIndexDefines is now
-// only an OGM adapter input used to instantiate the generic snapshot bounds.
-static constexpr uint8_t kBridgeQueueSize = 50;
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
+#ifndef MBUS_RTU_SLAVE_BRIDGE_MAX_COILS
+#define MBUS_RTU_SLAVE_BRIDGE_MAX_COILS 64U
+#endif
+#ifndef MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS
+#define MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS 32U
+#endif
+#ifndef MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE
+#define MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE 50U
+#endif
+
+static_assert(MBUS_RTU_SLAVE_BRIDGE_MAX_COILS > 0U,
+              "Bridge coil snapshots need non-zero capacity");
+static_assert(MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS > 0U,
+              "Bridge register snapshots need non-zero capacity");
+static_assert(MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE > 1U &&
+                  MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE <= 255U,
+              "Bridge queue size must fit its uint8_t ring indexes");
+
+static constexpr uint8_t kBridgeQueueSize =
+    static_cast<uint8_t>(MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE);
 static constexpr uint8_t kBridgeOverflowQueueSize = kBridgeQueueSize;
-using BridgePendingSnapshot = ModbusRTU::FixedCapacityIngressSnapshot<
-    PinIndexDefines::MAX_MULTI_COILS,
-    PinIndexDefines::MAX_MULTI_HRS>;
-
-// OGM compatibility record. Its established names and byte width stay intact;
-// BridgePendingIngressTraits maps the neutral journal concepts at compile time
-// so forwarding requires neither type punning nor an additional record copy.
-struct BridgePending {
-  uint16_t start = 0U;
-  uint16_t count = 0U;
-  uint16_t sessionGeneration = 0U;
-  uint16_t sourceToken = 0U;
-  uint8_t ops = 1U;
-  uint8_t meta = 0U;
-  uint8_t snapshotCount = 0U;
-  BridgePendingSnapshot snapshot{};
-};
-
-struct BridgePendingIngressTraits {
-  using Entry = BridgePending;
-
-  static uint16_t sourceToken(const Entry& entry) {
-    return entry.sourceToken;
-  }
-
-  static void initialize(
-      Entry& entry, uint16_t start, uint16_t count, uint16_t context,
-      uint16_t sourceToken, uint8_t units, uint8_t attributes,
-      uint8_t snapshotCount) {
-    entry.start = start;
-    entry.count = count;
-    entry.sessionGeneration = context;
-    entry.sourceToken = sourceToken;
-    entry.ops = units;
-    entry.meta = attributes;
-    entry.snapshotCount = snapshotCount;
-  }
-
-  #if defined(__GNUC__) || defined(__clang__)
-  __attribute__((always_inline))
-  #endif
-  static inline void copyCoils(
-      Entry& entry, const bool* values, uint16_t count) {
-    if(count == 1U){
-      entry.snapshot.coils[0] = values[0];
-      return;
-    }
-    memcpy(entry.snapshot.coils, values,
-           static_cast<size_t>(count) * sizeof(bool));
-  }
-
-  #if defined(__GNUC__) || defined(__clang__)
-  __attribute__((always_inline))
-  #endif
-  static inline void copyHolding(
-      Entry& entry, const uint16_t* values, uint16_t count) {
-    if(count == 1U){
-      entry.snapshot.holding[0] = values[0];
-      return;
-    }
-    memcpy(entry.snapshot.holding, values,
-           static_cast<size_t>(count) * sizeof(uint16_t));
-  }
-};
 
 using BridgeIngressJournal = ModbusRTU::FixedCapacityIngressJournal<
-    PinIndexDefines::MAX_MULTI_COILS,
-    PinIndexDefines::MAX_MULTI_HRS,
-    kBridgeQueueSize,
-    BridgePendingIngressTraits>;
+    MBUS_RTU_SLAVE_BRIDGE_MAX_COILS,
+    MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS,
+    kBridgeQueueSize>;
 using BridgeIngressEntry = BridgeIngressJournal::Entry;
 #endif
 
@@ -114,40 +64,40 @@ using BridgeIngressEntry = BridgeIngressJournal::Entry;
 //
 // It focuses on accepted write replies because that is the path that should
 // acknowledge immediately regardless of downstream handler work.
-#ifndef BRIDGE_UPSTREAM_TX_DIAG
-#define BRIDGE_UPSTREAM_TX_DIAG 0
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS 0
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_INTERVAL_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_INTERVAL_MS 1000UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_INTERVAL_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_INTERVAL_MS 1000UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_2_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_2_MS 2UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_2_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_2_MS 2UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_5_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_5_MS 5UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_5_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_5_MS 5UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_10_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_10_MS 10UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_10_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_10_MS 10UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_20_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_PUMP_SLOW_20_MS 20UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_20_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_PUMP_SLOW_20_MS 20UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_5_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_5_MS 5UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_5_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_5_MS 5UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_10_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_10_MS 10UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_10_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_10_MS 10UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_20_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_20_MS 20UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_20_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_20_MS 20UL
 #endif
-#ifndef BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_40_MS
-#define BRIDGE_UPSTREAM_TX_DIAG_DONE_SLOW_40_MS 40UL
+#ifndef MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_40_MS
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_DONE_SLOW_40_MS 40UL
 #endif
-#if BRIDGE_UPSTREAM_TX_DIAG && defined(OGM_BRIDGE_MODE)
-#define BRIDGE_UPSTREAM_TX_DIAG_ENABLED 1
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS && defined(MBUS_RTU_SLAVE_BRIDGE_MODE)
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED 1
 #else
-#define BRIDGE_UPSTREAM_TX_DIAG_ENABLED 0
+#define MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED 0
 #endif
 
 class ModbusRTUSlave {
@@ -170,7 +120,7 @@ class ModbusRTUSlave {
     ModbusRTUSlave(Serial_& serial, uint8_t dePin = NO_DE_PIN);
     #endif
     //can pass nullptr
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     void configurePlatformMutex(PlatformMutex* coilMut,
                                 PlatformMutex* diMut,
                                 PlatformMutex* irMut,
@@ -187,7 +137,7 @@ class ModbusRTUSlave {
     #endif
     void poll();
     void tx_pump();
-#ifdef OGM_MODBUS_MT_ACCESSORS
+#ifdef MBUS_RTU_SLAVE_WORK_ACCESSORS
     struct WorkState {
       uint8_t flags = 0;
       bool rxInFrame() const { return flags & 0x01; }
@@ -196,7 +146,7 @@ class ModbusRTUSlave {
     WorkState workState() const;
     bool hasWorkPending() const;
 #endif
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     struct DebugInfo {
       volatile uint32_t last_poll_us = 0;
       volatile uint32_t last_poll_gap_ms = 0;
@@ -238,14 +188,14 @@ class ModbusRTUSlave {
     const DebugInfo& debugInfo() const { return dbg_; }
 #endif
 
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     enum BridgeDropReason : uint8_t {
       kBridgeDropReasonOverflow = 0,
-      kBridgeDropReasonInactive = 1,
+      kBridgeDropReasonAdmissionRejected = 1,
     };
-    static constexpr uint8_t kBridgePendingFlagFireForget = 0x80U;
-    static constexpr uint8_t kBridgePendingFlagPublicDebt = 0x40U;
-    static constexpr uint8_t kBridgePendingReasonMask = 0x3FU;
+    static constexpr uint8_t kBridgeIngressFlagFireForget = 0x80U;
+    static constexpr uint8_t kBridgeIngressFlagResponseRequired = 0x40U;
+    static constexpr uint8_t kBridgeIngressReasonMask = 0x3FU;
 
     // Bridge helpers: report pending upstream writes (single or multi) per table.
     bool bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
@@ -262,35 +212,35 @@ class ModbusRTUSlave {
     bool bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason);
     bool bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops);
     bool bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops);
-    // Legacy aggregate overflow check (no details).
+    // Convenience check when the caller only needs to know that a drop exists.
     bool bridgeConsumeOverflow();
     // Durable source transfer API. Peek copies the current head without
     // releasing it. Commit succeeds only for the exact token returned by peek.
     // A destination queue that is full must not call commit.
     // The combined API preserves accepted order across the separate coil and
     // holding rings. isCoil identifies the selected ring for exact commit.
-    bool bridgePeekNext(BridgePending& pending, bool& isCoil) const;
+    bool bridgePeekNext(BridgeIngressEntry& pending, bool& isCoil) const;
     bool bridgeCommitNext(bool isCoil, uint16_t sourceToken);
-    bool bridgePeekCoils(BridgePending& pending) const;
+    bool bridgePeekCoils(BridgeIngressEntry& pending) const;
     bool bridgeCommitCoils(uint16_t sourceToken);
-    bool bridgePeekHolding(BridgePending& pending) const;
+    bool bridgePeekHolding(BridgeIngressEntry& pending) const;
     bool bridgeCommitHolding(uint16_t sourceToken);
-    bool bridgePeekOverflowCoils(BridgePending& pending) const;
+    bool bridgePeekOverflowCoils(BridgeIngressEntry& pending) const;
     bool bridgeCommitOverflowCoils(uint16_t sourceToken);
-    bool bridgePeekOverflowHolding(BridgePending& pending) const;
+    bool bridgePeekOverflowHolding(BridgeIngressEntry& pending) const;
     bool bridgeCommitOverflowHolding(uint16_t sourceToken);
     // Optional bridge-local range hook (used by bridge firmware to bypass forwarding).
     using BridgeLocalRangeFn = bool (*)(uint16_t start, uint16_t count, bool isCoil);
     using BridgeLocalWriteFn = void (*)(uint16_t start, uint16_t count, bool isCoil);
     using BridgeAdmissionFn = bool (*)(uint16_t start, uint16_t count,
                                       bool isCoil, bool fireForget,
-                                      uint16_t& sessionGeneration);
+                                      uint16_t& context);
     static void setBridgeLocalRangeFn(BridgeLocalRangeFn fn);
     static void setBridgeLocalWriteFn(BridgeLocalWriteFn fn);
     static void setBridgeAdmissionFn(BridgeAdmissionFn fn);
 #endif
 
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     static constexpr uint8_t kBridgeUpstreamTxFcCount = 4U;
     static constexpr uint8_t kBridgeUpstreamTxQtyBucketCount = 4U;
     static constexpr uint8_t kBridgeUpstreamTxThresholdCount = 4U;
@@ -317,7 +267,7 @@ class ModbusRTUSlave {
 
   private:
     HardwareSerial *_hardwareSerial = 0;
-    #ifdef OGM_USE_MUTEX
+    #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     PlatformMutex* _coilMut = nullptr;
     PlatformMutex* _diMut = nullptr;
     PlatformMutex* _irMut = nullptr;
@@ -381,22 +331,22 @@ class ModbusRTUSlave {
     uint32_t _txStartUs = 0;
     uint32_t _txDoneUs = 0;
 
-#ifdef USB_DEBUG
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     DebugInfo dbg_{};
 #endif
 
-#ifdef OGM_BRIDGE_MODE
+#ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     using BridgeIngressReservation = BridgeIngressJournal::Reservation;
     using BridgeIngressTable = BridgeIngressJournal::Table;
 
-    // Only successfully admitted writes enter the neutral journal. OGM loss
-    // accounting remains an explicit adapter concern below.
+    // Only successfully admitted writes enter the source journal. Rejected or
+    // saturated writes are retained separately as diagnostic entries.
     BridgeIngressJournal _bridgeSourceJournal;
 
-    BridgePending _bridgeOverflowCoilQ[kBridgeOverflowQueueSize];
+    BridgeIngressEntry _bridgeOverflowCoilQ[kBridgeOverflowQueueSize];
     volatile uint8_t _bridgeOverflowCoilHead = 0U;
     volatile uint8_t _bridgeOverflowCoilTail = 0U;
-    BridgePending _bridgeOverflowHrQ[kBridgeOverflowQueueSize];
+    BridgeIngressEntry _bridgeOverflowHrQ[kBridgeOverflowQueueSize];
     volatile uint8_t _bridgeOverflowHrHead = 0U;
     volatile uint8_t _bridgeOverflowHrTail = 0U;
     uint16_t _bridgeOverflowToken = 1U;
@@ -406,15 +356,15 @@ class ModbusRTUSlave {
     // immutable snapshot is durable before an ACK can be queued.
     bool bridgeReserveCoilIngress(
         uint16_t start, uint16_t count, bool ff,
-        uint16_t sessionGeneration, bool publicDebt,
+        uint16_t context, bool responseRequired,
         BridgeIngressReservation& reservation);
     bool bridgeReserveHoldingIngress(
         uint16_t start, uint16_t count, bool ff,
-        uint16_t sessionGeneration, bool publicDebt,
+        uint16_t context, bool responseRequired,
         BridgeIngressReservation& reservation);
     bool bridgeReserveIngressFailure(
         uint16_t start, uint16_t count, bool isCoil, bool ff,
-        uint16_t sessionGeneration);
+        uint16_t context);
     bool bridgeCommitCoilIngress(
         const BridgeIngressReservation& reservation);
     bool bridgeCommitHoldingIngress(
@@ -422,18 +372,18 @@ class ModbusRTUSlave {
     bool bridgeCommitIngressFailure(
         const BridgeIngressReservation& reservation, bool isCoil);
     bool bridgeWriteAllowed(uint16_t start, uint16_t count, bool isCoil, bool ff,
-                            uint16_t& sessionGeneration);
+                            uint16_t& context);
     bool bridgeIsLocalRange(uint16_t start, uint16_t count, bool isCoil) const;
     bool bridgeShouldNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil, bool isLocal) const;
     void bridgeNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil) const;
-    uint16_t bridgeOpsForCount(uint16_t count, bool isCoil) const;
-    void bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count, uint16_t ops,
-                            uint8_t reason, bool ff, uint16_t sessionGeneration);
+    uint16_t bridgeUnitsForCount(uint16_t count, bool isCoil) const;
+    void bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count, uint16_t units,
+                            uint8_t reason, bool ff, uint16_t context);
     bool bridgeOverflowDequeue(bool isCoil, uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff);
     static BridgeLocalRangeFn _bridgeLocalRangeFn;
     static BridgeLocalWriteFn _bridgeLocalWriteFn;
     static BridgeAdmissionFn _bridgeAdmissionFn;
-#ifdef OGM_USE_MUTEX
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
     // Source and diagnostic rings are SPSC across the upstream and bridge
     // runtime threads. Protect payload publication as well as head/tail state;
     // volatile indexes alone do not provide a cross-core happens-before edge.
@@ -442,7 +392,7 @@ class ModbusRTUSlave {
 #endif
 #endif
 
-#if BRIDGE_UPSTREAM_TX_DIAG_ENABLED
+#if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     struct BridgeUpstreamTxDiagState {
       uint32_t accepted = 0;
       uint32_t queued = 0;

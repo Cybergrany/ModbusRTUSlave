@@ -31,7 +31,7 @@
 /**
  * Allocation-free transactional write journal for Modbus-style table writes.
  *
- * This file deliberately has no Arduino, RTOS, serial, pin-map, or OGM
+ * This file deliberately has no Arduino, RTOS, serial, pin-map, or product
  * dependencies.  A protocol parser can therefore reserve journal capacity,
  * mutate its register image, capture an immutable post-mutation snapshot, and
  * publish the write before acknowledging it without coupling this mechanism to

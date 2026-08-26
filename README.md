@@ -34,7 +34,7 @@ Use this library to:
   the wrapping Arduino microsecond clock, with target-specific drain handling
   where required.
 - **Optional integration hooks.** Compile-time mutexes, work-state accessors,
-  statistics, diagnostics, and a durable ingress journal are available while
+  diagnostics, and a durable ingress journal are available while
   the default build stays small. See
   [optional compile-time features](src/README.md#optional-compile-time-features).
 - **Transactional bridge ingress.** Accepted non-local writes can be reserved,
@@ -103,10 +103,10 @@ support it.
 ## Advanced integration
 
 The default API needs only Arduino and the four caller-owned tables. Optional
-features can add table mutexes, parser work-state accessors, counters, and
+features can add table mutexes, parser work-state accessors, diagnostics, and
 durable write snapshots for a downstream worker. These features are selected
-at compile time and may require application-provided adapter headers. Their
-exact contracts are documented in [the API guide](src/README.md).
+at compile time. Their exact contracts and build flags are documented in
+[the API guide](src/README.md).
 
 The journal under `src/detail/` is an implementation detail. Integrations
 should use the public `ModbusRTUSlave` methods rather than include that header

@@ -60,16 +60,32 @@ deadline calculations are safe across the wrapping Arduino microsecond clock.
 
 ## Optional compile-time features
 
-The default build adds no platform mutex, journal, statistics adapter, or
-diagnostics state. Guarded declarations in
+The default build adds no platform mutex, journal, or diagnostics state.
+Guarded declarations in
 [`ModbusRTUSlave.h`](ModbusRTUSlave.h) provide these optional features:
 
 - one caller-provided mutex per Modbus table;
 - `workState()` and `hasWorkPending()` for cooperative schedulers;
 - request, response, timing, and transmit diagnostics;
-- application-owned statistics adapters;
 - optional receive purging after transmit; and
 - durable admitted-write snapshots for a store-and-forward worker.
+
+Define the needed flags for both the application and the library source:
+
+| Flag | Effect |
+| --- | --- |
+| `MBUS_RTU_SLAVE_USE_MUTEX` | Enables caller-provided table mutexes. |
+| `MBUS_RTU_SLAVE_WORK_ACCESSORS` | Adds `workState()` and `hasWorkPending()`. |
+| `MBUS_RTU_SLAVE_DIAGNOSTICS` | Adds protocol and timing counters. |
+| `MBUS_RTU_SLAVE_PURGE_RX_AFTER_TX` | Discards received bytes after a reply drains. |
+| `MBUS_RTU_SLAVE_BRIDGE_MODE` | Adds the fixed-capacity ingress API. |
+| `MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS=1` | Adds aggregate bridge reply timing counters. |
+
+Bridge mode defaults to 64 coil values per snapshot, 32 holding registers per
+snapshot, and 50 journal slots. Override these before including the header
+with `MBUS_RTU_SLAVE_BRIDGE_MAX_COILS`,
+`MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS`, and
+`MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE`.
 
 Build flags that change declarations, object layout, or behavior must be
 defined consistently for the application and the library source.
@@ -81,7 +97,7 @@ local-range classification, and local-write notification:
 
 ```cpp
 bool admit(uint16_t start, uint16_t count, bool isCoil,
-           bool fireAndForget, uint16_t& generation);
+           bool fireAndForget, uint16_t& context);
 bool isLocal(uint16_t start, uint16_t count, bool isCoil);
 void localWrite(uint16_t start, uint16_t count, bool isCoil);
 
@@ -89,6 +105,11 @@ ModbusRTUSlave::setBridgeAdmissionFn(&admit);
 ModbusRTUSlave::setBridgeLocalRangeFn(&isLocal);
 ModbusRTUSlave::setBridgeLocalWriteFn(&localWrite);
 ```
+
+Without an admission callback, non-local writes are admitted with context
+zero. No coil or register address has built-in application meaning. A local
+range bypasses the ingress journal and invokes the local-write callback after
+mutation.
 
 For an admitted non-local write, the order is:
 
@@ -101,6 +122,15 @@ For an admitted non-local write, the order is:
 rings. Retire an item with `bridgeCommitNext()` only after the destination has
 accepted it, using the exact source token returned by the peek. If the
 destination is full, leave the source item uncommitted.
+
+`BridgeIngressEntry` exposes `start`, `count`, caller-defined `context`,
+monotonic `sourceToken`, `units`, `attributes`, `snapshotCount`, and the
+immutable coil or holding-register snapshot. `kBridgeIngressFlagFireForget`
+marks a no-response request;
+`kBridgeIngressFlagResponseRequired` marks a request whose caller expects a
+response. Rejected admission and full-journal records are available through
+the overflow peek/commit methods with a `BridgeDropReason` in the low bits of
+`attributes`.
 
 ## Ingress journal
 
