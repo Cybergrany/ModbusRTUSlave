@@ -156,11 +156,12 @@
       "status": "passed",
       "consumer_tuple": {
         "OGM_Portable": "a9e98e849b4227159be6b3c527b1a32be14394d2",
-        "OpenGameMaster_pio": "7f18bc98920fed6e8861f716a087bb62a8efbf42",
-        "OGM_The_Core": "c38b59f90bac4795cf2f63001ac7f0db0d20b55c",
-        "OGM_bridge": "37ac32674270d0e44a31a56ac8d64a0cdfe83310",
+        "OpenGameMaster_pio": "ad8352a6d50f5059999255e65a564ba4e5321568",
+        "OGM_The_Core": "4bd58a2f612b2c474a0101a9a5841839b70a795a",
+        "OGM_bridge": "41e90c20afa97117e8d12cabdad4e1c430feefe3",
         "OGM_slave_core": "be16e277132cdf388bf1bc1df9f807fd9c70818a",
-        "OGM_Slave_prod": "06257db337d5d294d093d94f761ef2b114a572b6"
+        "OGM_Slave_prod": "06257db337d5d294d093d94f761ef2b114a572b6",
+        "ModbusRTUStoreForwardBridge": "d287fa92fd733bbdf4eec6ad3667fb095c224890"
       },
       "slave_nano": {
         "result": "ELF_and_HEX_byte_identical",
