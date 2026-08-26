@@ -19,6 +19,8 @@ trap cleanup EXIT
 
 cd "$repo_root"
 
+python3 scripts/validate_fork_lock.py --self-test
+python3 scripts/validate_fork_lock.py
 scripts/check_ogm_layout_migration.sh ${OGM_SLAVE_CORE_REFERENCE:+"$OGM_SLAVE_CORE_REFERENCE"}
 
 common_host_flags=(

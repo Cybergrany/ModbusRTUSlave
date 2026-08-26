@@ -13,9 +13,12 @@ public header:
 > Version `2.1.0-ogm.1` is the clean-layout software candidate. Its behavior is
 > frozen by differential tests and an exact optimized-object comparison.
 > `OGM_slave_core` has completed its software ownership cutover at the immutable
-> tuple recorded below; dependent firmware artifact comparison and physical
-> RS485 validation remain pending. Pin the final reviewed tag or full commit,
-> not a moving branch.
+> tuple recorded below. The final dependent firmware comparison is complete:
+> the Nano slave image is byte-identical and the bridge image differs only in
+> an absolute build-root string stored by an mbed assertion. The same
+> behavior-bearing tuple already passed the OGM bridge/slave RS485 and gameplay
+> checkpoint, so this source-layout-only cutover does not require a repeat
+> hardware run. Pin the final reviewed tag or full commit, not a moving branch.
 
 ## What this fork adds
 
@@ -105,8 +108,15 @@ ordinary HTTPS dependency pinned at
 `776b7e0147f495585fd368e10fcd81f81534ba8f`. Fresh validation at that exact
 visibility-aware tuple passed 10/10 OGM policy tests, 29/29 package-linked
 Modbus cases, single-owner symbol checks, strict performance, and package
-hygiene. Those are software acceptance results; dependent firmware artifacts
-and real RS485 behavior are not yet accepted.
+hygiene. At the final coordinated consumer tuple, `slave_nano` retained an
+identical ELF and HEX, while `bridge_console` retained every decoded machine
+instruction and all symbol sizes. Its 16-byte flash-only delta is the longer
+checkout path captured by an mbed `MBED_ASSERT` in the byte-identical
+`PlatformMutex.h`; RAM, Modbus ownership, request logic and normal-path timing
+are unchanged. The behavior-bearing tuple had already passed the physical
+bridge/slave checkpoint with deployed slave firmware unchanged. The exact
+final packaging artifact was not separately flashed; validation is transferred
+only because this final delta contains no executable or protocol change.
 
 ## Basic usage
 

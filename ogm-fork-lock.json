@@ -152,12 +152,38 @@
         "package_hygiene": "passed"
       }
     },
-    "firmware_artifact_comparison": false,
-    "hardware_validation": false,
-    "remaining_gates": [
-      "rebuild the exact dependent OGM slave and bridge firmware trees from the ownership-cutover tuple",
-      "compare post-cutover slave and bridge artifacts, symbols, stack, RAM and flash with the embedded-source baseline",
-      "perform physical slave and bridge RS485 validation before a release"
-    ]
+    "firmware_artifact_comparison": {
+      "status": "passed",
+      "consumer_tuple": {
+        "OGM_Portable": "a9e98e849b4227159be6b3c527b1a32be14394d2",
+        "OpenGameMaster_pio": "7f18bc98920fed6e8861f716a087bb62a8efbf42",
+        "OGM_The_Core": "c38b59f90bac4795cf2f63001ac7f0db0d20b55c",
+        "OGM_bridge": "37ac32674270d0e44a31a56ac8d64a0cdfe83310",
+        "OGM_slave_core": "be16e277132cdf388bf1bc1df9f807fd9c70818a",
+        "OGM_Slave_prod": "06257db337d5d294d093d94f761ef2b114a572b6"
+      },
+      "slave_nano": {
+        "result": "ELF_and_HEX_byte_identical",
+        "elf_sha256": "8ad0bf1f9af8b40acd8bebdb206d44a04c85858aab1d0d95f6d990d896246a75",
+        "hex_sha256": "e341e27fcf55a1748c0a4e20fe5c4e0b939eef16d2d31345ab203c0c95e3105e",
+        "flash_bytes": 11286,
+        "ram_bytes": 1234
+      },
+      "bridge_console": {
+        "result": "decoded_instructions_and_symbol_sizes_identical",
+        "candidate_bin_sha256": "6ba6028ffde36d6499cb5d97a0dbb3e0448c7b95aa1dc44d91b408b859e1a272",
+        "text_delta_bytes": 16,
+        "data_delta_bytes": 0,
+        "bss_delta_bytes": 0,
+        "only_cause": "absolute build-root __FILE__ string in mbed assertion plus alignment"
+      }
+    },
+    "hardware_validation": {
+      "exact_final_packaging_artifact_flashed": false,
+      "behavior_bearing_tuple_previously_accepted": true,
+      "release_disposition": "no_additional_hardware_gate_required",
+      "basis": "final cutover changes package ownership and paths only; slave image is exact and bridge executable instructions are exact"
+    },
+    "remaining_gates": []
   }
 }
