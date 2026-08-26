@@ -1,6 +1,6 @@
 // Includes code derived from CMB27/ModbusRTUSlave (MIT).
 // See THIRD_PARTY_NOTICES.md and LICENSES/CMB27-ModbusRTUSlave-MIT.txt.
-#include "Comms/ModbusRTUSlave.h"
+#include "ModbusRTUSlave.h"
 #include <string.h>
 #ifdef __AVR__
 #include <avr/pgmspace.h>
@@ -1053,6 +1053,16 @@ void ModbusRTUSlave::_processWriteMultipleHoldingRegisters() {
 }
 
 bool ModbusRTUSlave::_readRequest() {
+  // TODO(rx-framing): Stream exposes queued bytes, not their physical arrival times.
+  // If poll() is delayed until two legal RTU frames are buffered, their real T3.5
+  // gap is lost here; this drain concatenates them and the single CRC check below
+  // rejects both. The edge is local to each slave's service cadence, so another
+  // node may parse the same wire traffic correctly. Characterize it by queuing two
+  // CRC-valid ADUs before one service pass (including FC69 followed by unicast) and
+  // asserting that each is extracted without a spurious CRC failure. Mitigate by
+  // peeling one function-length-derived ADU at a time while retaining trailing
+  // bytes, or by carrying UART idle/per-byte timing into the parser; do not merely
+  // suppress the CRC statistic.
   // ingest available bytes without waiting
   while (_serial->available() && _rxNumBytes < MODBUS_RTU_SLAVE_BUF_SIZE) {
     uint8_t b = _serial->read();

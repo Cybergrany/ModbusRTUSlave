@@ -1,182 +1,163 @@
 # OpenGameMaster fork provenance
 
-This repository retains the complete CMB27 Git history. Its long-lived lines
-have deliberately different purposes:
+This repository retains CMB27's complete Git ancestry while presenting the
+additional OpenGameMaster work as a maintained, portable library. The intended
+long-lived branch model is:
 
-- `main` tracks `upstream/main` without OGM changes.
-- `ogm/compat` starts at the historical CMB27 revision used as the OGM slave
-  source base. Reviewed OGM compatibility changes are replayed only here.
+- `main`: the reviewed OGM-maintained implementation and public API;
+- `upstream/main`: current CMB27 development, fetched for comparison;
+- historical `ogm/compat`: frozen pre-layout replay retained until the clean
+  migration has completed final review.
 
-Do not merge or rebase current upstream into `ogm/compat`. CMB27 3.x split the
-slave across ModbusADU and ModbusSlaveLogic and changed the API. Reconciling
-that redesign is a separate migration, not part of this repository move.
+The OGM line is based on the self-contained CMB27 2.x implementation. Current
+CMB27 3.x uses ModbusADU and ModbusSlaveLogic and is a separate architecture;
+it must not be mechanically merged into this fork.
 
 ## Immutable anchors
 
 | Purpose | Commit |
 | --- | --- |
-| CMB27 revision reviewed before fork seeding | `83c2b50e32c0d10ea8e300761f1bbd058eb9d1bd` |
-| `ogm/compat` branch point | `65ae4dd4cf121f42a3a9daa917034e319ebed65e` |
-| First source import in `OGM_slave_core` | `6ce585ddfcaba7e4517700f858c53410b935caae` |
-| Functional replay source | `73925642c29a0f419b2b3cb160647dee71f4c078` |
+| Current CMB27 head reviewed while seeding the fork | `83c2b50e32c0d10ea8e300761f1bbd058eb9d1bd` |
+| Historical CMB27 branch point used by OGM | `65ae4dd4cf121f42a3a9daa917034e319ebed65e` |
+| First source import into `OGM_slave_core` | `6ce585ddfcaba7e4517700f858c53410b935caae` |
+| Frozen executable source replay | `73925642c29a0f419b2b3cb160647dee71f4c078` |
+| Frozen pre-layout candidate | `05c70b32625bba97691a3902e21f4316cf4689d6` |
+| RX-framing investigation note | `0ad325f333204225468d1f7c4ae65a408a1bf87b` |
+| RX-framing note merge into `OGM_slave_core` | `02b93e2898a5456486d4ee8fbcacde9973526b6d` |
 
-At first import OGM disabled AVR `SoftwareSerial`; the remaining imported
-source matched the CMB27 branch point. The initial and current hashes, later
-upstream lineage references, optional OGM adapter hashes, and validation state
-are machine-readable in [`ogm-fork-lock.json`](ogm-fork-lock.json).
+At first import, OGM disabled AVR `SoftwareSerial`; the remaining source
+matched the CMB27 branch point. The exact initial/current hashes and optional
+adapter providers are machine-readable in [`ogm-fork-lock.json`](ogm-fork-lock.json).
 
-## Current compatibility status
+## What OGM added
 
-The functional replay is implemented as package version `2.0.6-ogm.1`. The
-three production files are byte-for-byte copies of the source anchor:
+The following is established behavior carried from OGM, not new logic written
+for the clean-layout migration:
 
-| Candidate file | SHA-256 |
+| Theme | OGM history |
 | --- | --- |
-| `src/Comms/ModbusRTUSlave.h` | `cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d` |
-| `src/Comms/ModbusRTUSlave.cpp` | `7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa` |
-| `src/Comms/ModbusRTUIngressJournal.h` | `f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e` |
-
-Commit `0e63f6f7bd1e51974a6dbccf18585213d6c57cbe` performs the source transfer.
-The only production packaging addition is `src/ModbusRTUSlave.h`, a 13-line
-include forwarder. It preserves both `<ModbusRTUSlave.h>` for normal Arduino
-users and `"Comms/ModbusRTUSlave.h"` for a later OGM ownership cutover. No
-function body, conditional branch, constant, declaration, register shape, data
-layout, call order, or platform call changed.
-
-Against the historical 2.x branch point, the carried OGM header measures 405
-insertions/10 deletions and the implementation 1,503 insertions/115 deletions.
-Against the validated embedded OGM source, executable drift is 0 lines and all
-three files compare byte-for-byte. The large historical divergence is therefore
-visible and reviewable without being reinterpreted during packaging.
-
-The candidate passes the frozen 29-scenario production characterization, the
-655,560-check ingress-journal oracle, strict host and AVR C++11 compiles of the
-standalone journal, a complete-package Nano/AVR Arduino C++11 build, fixed
-object-size checks, an exact independently compiled `-Os` bridge-mode object
-comparison, strict same-host performance ceilings, and PlatformIO package
-validation. That makes it a software
-candidate for an isolated consumer cutover. It is not a compatibility release:
-no consumer has switched to it and no slave/bridge hardware validation is
-claimed.
-
-## Functional divergence ledger
-
-This ledger describes behavior already present in the exact source anchor. It
-does not describe new edits made by this repository transfer.
-
-| Established OGM theme | Source history |
-| --- | --- |
-| Initial self-contained 2.x import; AVR `SoftwareSerial` disabled | `6ce585dd` |
-| FC `0x45` targeted broadcast, silent ordinary broadcasts, nonblocking RX framing/T3.5 and cooperative TX completion | `d506e894` through `bdade566`, including `e15ffc1f` timing trim |
+| Self-contained 2.x import and disabled AVR `SoftwareSerial` | `6ce585dd` |
+| FC `0x45` targeted broadcast, standard broadcast silence, nonblocking RX/T3.5, cooperative TX | `d506e894` through `bdade566`, including `e15ffc1f` |
 | Platform-selected table mutexes and per-instance RX/TX state | `7954a7b4`, `d6bfa4b8`, `1d6ea3db` |
-| Optional slave statistics and USB diagnostics | `a35aee02`; `a7784845` through `3b100642` |
-| Bridge admission, local-range notifications, source/overflow queues, operation accounting and fire-forget/public-debt metadata | `6eded705` through `ba958619` |
-| Exact-token durable source handoff and immutable passthrough snapshots | `79363fd2`, `cf04bd1f` |
-| GIGA bridge 8N1 one-argument `begin()` workaround | `0cbbb65b` |
-| AVR-safe 16-bit byte-to-word conversion | `d93a383a` |
-| Optional work-state and upstream TX diagnostics | `c3a90468`, `ecf83b66` |
+| Optional statistics and USB diagnostics | `a35aee02`; `a7784845` through `3b100642` |
+| Bridge admission, local notifications, source/overflow queues and write metadata | `6eded705` through `ba958619` |
+| Exact-token durable handoff and immutable passthrough snapshots | `79363fd2`, `cf04bd1f` |
+| GIGA bridge 8N1 workaround, AVR byte conversion, scheduler state, TX diagnostics | `0cbbb65b`, `d93a383a`, `c3a90468`, `ecf83b66` |
 | Allocation-free transactional ingress journal | `19c3af6a` |
 
-The full OGM history remains the authoritative fine-grained ledger. The source
-anchor and hashes prevent this thematic summary from concealing a code delta.
+Against the CMB27 branch point, the carried OGM header measures 405
+insertions/10 deletions and the implementation 1,503 insertions/115 deletions.
+The fine-grained OGM history remains authoritative; this table is only a map.
 
-## Intentional package-only divergences
+## Clean public-layout migration
 
-1. Production files live under `src/Comms/` so their established include paths
-   and bytes remain intact; a top-level public header forwards to them.
-2. Package metadata uses the unambiguous prerelease identity
-   `2.0.6-ogm.1` and the Cybergrany repository URL. It does not reuse CMB27's
-   materially different `2.0.6` release identity.
-3. The maintained example removes the unavailable `SoftwareSerial` option,
-   calls `tx_pump()` after `poll()`, and documents cooperative TX completion.
-4. Documentation, frozen host fixtures, strict journal C++11/AVR compile
-   gates, a full-package Nano compile, package checks and performance
-   comparators are added. They do not compile into consumers.
+The pre-layout package `2.0.6-ogm.1` intentionally copied three embedded files
+byte-for-byte under `src/Comms/` and added a root include forwarder. That was a
+useful source-identity checkpoint, but it obscured the public fork behind OGM's
+old internal directory structure.
 
-No other transfer delta is intentional. Run
-`scripts/check_ogm_source_parity.sh` to fail closed if a production byte moves.
+Version `2.1.0-ogm.1` removes that temporary compatibility layout:
+
+| Canonical file | Role | SHA-256 |
+| --- | --- | --- |
+| `src/ModbusRTUSlave.h` | Real portable public declaration | `c53562fe91a353b4bbbbf7febd65f826d700d3900f6e6431cc5ec57fa054e687` |
+| `src/ModbusRTUSlave.cpp` | Package-owned implementation | `506257c11f891e5a839f177dda96b92ffd439232336e082ced3a444486d4c30f` |
+| `src/detail/ModbusRTUIngressJournal.h` | Internal neutral transactional journal | `f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e` |
+
+The allowed delta from `OGM_slave_core` `73925642` is deliberately narrow:
+
+1. move the declaration from `Comms/ModbusRTUSlave.h` to
+   `ModbusRTUSlave.h` and update its journal include;
+2. move the implementation to `src/ModbusRTUSlave.cpp` and include the public
+   header by its canonical name;
+3. move the unchanged neutral journal under `src/detail/`;
+4. remove two inherited trailing spaces while moving the real public header;
+5. carry the exact comment-only RX-framing TODO from `0ad325f3` beside
+   `_readRequest()`.
+
+No function body, branch, constant, declaration, register shape, object
+layout, call order, platform operation, or wire rule changed. The normalized
+source comparator fails closed if anything outside those transformations
+moves. Independently compiled optimized bridge-profile objects are
+byte-identical before and after the layout migration.
+
+The old `Comms/` public path is intentionally absent and a negative compile
+gate enforces its removal. Ordinary consumers already using
+`<ModbusRTUSlave.h>` require no source edit; embedded OGM consumers must update
+their includes and atomically transfer `.cpp` ownership to this package.
 
 ## Optional OGM adapter boundary
 
-The standalone build needs only Arduino. Existing compile-time OGM features
-retain their exact include contracts rather than copying product code into this
-fork:
+The standalone library depends only on Arduino. Optional OGM features retain
+small compile-time provider contracts rather than importing product concepts:
 
 - `OGM_USE_MUTEX` obtains `PlatformMutex` and `SafePlatformMutex` from
-  `platform/PlatformMutex.h` in OGM_Portable.
-- `OGM_BRIDGE_MODE` obtains only the two snapshot bounds from
-  `IO/ExternalPins/PinIndexDefines.h` in OGM_Portable.
-- `USING_STATS` reports through the OGM-owned `Pins/SlaveStats.h` adapter.
+  `platform/PlatformMutex.h`;
+- `OGM_BRIDGE_MODE` obtains snapshot limits from
+  `IO/ExternalPins/PinIndexDefines.h`;
+- `USING_STATS` reports through application-owned `Pins/SlaveStats.h`.
 
-The exact providing commits and hashes are pinned in the lock file. This means
-the first compatibility candidate still exposes established `BridgePending`
-and static bridge callbacks behind `OGM_BRIDGE_MODE`. That is deliberate
-compatibility debt: replacing those names or introducing a new clock/GPIO/
-serial abstraction now would create the very semantic, timing and footprint
-drift this transfer is meant to avoid. Such cleanup should follow a successful
-source-ownership cutover as a separately gated change.
+The current `BridgePending` record and static bridge callbacks remain because
+changing them would be an API, timing, and footprint migration. External-board,
+child-routing, clock, GPIO, serial, and scheduling abstractions do not belong in
+this mechanical path pass.
 
-The neutral `ModbusRTUIngressJournal.h` is the exception: it is already free of
-Arduino, RTOS, pin-map and game dependencies, and belongs with the slave logic
-that uses it.
+The neutral ingress journal is already independent of Arduino, RTOS, pin maps,
+and game concepts. Its `detail/` placement states that consumers should use it
+through `ModbusRTUSlave`; it does not alter its compiled semantics.
 
-## Remote layout
+## Known RX framing debt
 
-```text
-origin    git@github.com:Cybergrany/ModbusRTUSlave.git
-upstream  https://github.com/CMB27/ModbusRTUSlave.git
-```
+The TODO introduced by `0ad325f3` and merged at `02b93e28` is retained verbatim
+beside `_readRequest()`. Arduino `Stream` exposes queued bytes but not their
+physical arrival times. When scheduling delays service until two valid ADUs are
+buffered, the parser can lose their T3.5 boundary, concatenate them, and reject
+both as one CRC-invalid frame even though another slave serviced promptly and
+accepted the same traffic.
 
-Refresh the upstream tracking line and publish compatibility work without
-rewriting either history:
+This migration does not claim to fix that behavior. A future change must first
+queue two CRC-valid ADUs before one service pass—including FC `0x45` followed
+by unicast—and require both to be extracted. Candidate mechanisms are
+function-length-aware ADU peeling with retained trailing bytes or UART
+idle/per-byte timing metadata. Hiding the CRC counter is explicitly
+insufficient. Because this changes parser behavior and real timing, it needs a
+dedicated software characterization and physical RS485 gate.
 
-```bash
+## Validation state
+
+The clean-layout candidate passes:
+
+- reviewed canonical hashes and normalized source comparison;
+- standalone and full OGM bridge-profile root-header/implementation compiles;
+- an enforced failure for the removed `Comms/ModbusRTUSlave.h` path;
+- exact optimized bridge-profile object parity with the embedded source;
+- 29 production wire, CRC, broadcast, exception, ordering, T3.5, TX and
+  footprint scenarios;
+- at least 655,560 deterministic journal checks plus host and AVR C++11
+  compile gates;
+- strict same-host performance ceilings, comparator self-tests, and the paired
+  forwarded-write comparison against the pre-layout candidate;
+- the maintained Nano/AVR C++11 example and PlatformIO package export.
+
+This is sufficient for a coordinated consumer migration with no expected
+runtime delta. It is not hardware acceptance. A release still requires:
+
+1. atomically remove/compile-exclude the embedded slave implementation and
+   journal while adding an immutable package pin;
+2. rebuild the exact OGM slave and bridge trees and compare artifacts, symbols,
+   stack, flash and RAM;
+3. validate the resulting consumer on the physical slave/bridge RS485
+   topology, including compatibility with deployed original slave firmware.
+
+## Upstream review policy
+
+Fetch upstream without rewriting the maintained fork:
+
+```sh
 git fetch upstream --prune --tags
-git push origin upstream/main:main
-git push -u origin ogm/compat
+git log --left-right --graph main...upstream/main
 ```
 
-The `upstream/main:main` push must remain fast-forward-only in practice. If it
-is rejected, inspect the fork divergence; never force-push either long-lived
-line.
-
-## Replay and release policy
-
-1. Preserve the exact source anchor for the repository move. Any subsequent
-   logic, API, platform, formatting or optimization change is a new reviewed
-   commit with its own differential gates.
-2. Keep optional OGM product dependencies compile-gated. Do not make
-   external-board, child, route or game concepts part of standalone behavior.
-3. Preserve request/response bytes, broadcast silence, admission/mutation/
-   publication/ACK order, T3.5 and TX timing, lock spans, diagnostics, object
-   layout and hot-path performance.
-4. Pin releases by immutable tag or full commit. Never consume `main` or
-   `ogm/compat` by moving branch name.
-5. Reconcile CMB27 3.x or neutralize the retained compatibility adapters only
-   as separate migrations after this exact-source package is proven.
-
-## Compatibility release gates
-
-A revision on `ogm/compat` is suitable for an OGM release only after all of the
-following evidence is recorded against one exact dependency tuple:
-
-1. Source provenance and package hashes remain exact.
-2. Valid, invalid, exception, CRC, truncated, overlength and broadcast fixtures
-   retain their frozen mutations, responses and statuses.
-3. Admission, mutation, callback, journal publication, reply and forwarding
-   order remain exact, including rejected and no-response requests.
-4. Frame boundaries, TX drain, flush, DE transitions and cleanup retain their
-   trace and hardware timing.
-5. Hot paths, stack, RAM, flash and fixed-capacity behavior are measured on the
-   relevant AVR and GIGA consumers.
-6. Source ownership transfers atomically: embedded slave `.h`/`.cpp` and
-   journal copies are removed or compile-excluded in the same consumer change
-   that adds the package. The exact OGM slave and bridge trees then build from
-   clean immutable pins, and their artifacts are compared with the
-   embedded-source baseline.
-7. The candidate runs on the physical slave/bridge RS485 topology. Existing
-   deployed slave compatibility remains part of that test.
-
-Passing the current software gates supports an isolated consumer migration
-because no behavior delta is expected. It does not replace the consumer-build
-or physical gates, and this branch deliberately records both as pending.
+Review and port upstream changes individually when they apply. Do not merge or
+rebase the 3.x line into the 2.x-derived OGM implementation. Releases are
+consumed through immutable tags or full commits, never a moving branch.

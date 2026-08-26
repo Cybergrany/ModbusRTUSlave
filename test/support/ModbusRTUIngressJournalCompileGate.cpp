@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "Comms/ModbusRTUIngressJournal.h"
+#include "detail/ModbusRTUIngressJournal.h"
 
 // Compile-only fixture: unlike an include-only smoke test, this instantiates
 // and exercises the default journal's producer and consumer templates. The

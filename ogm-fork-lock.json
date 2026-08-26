@@ -1,13 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "ModbusRTUSlave",
-  "package_version": "2.0.6-ogm.1",
-  "compatibility_branch": "ogm/compat",
+  "package_version": "2.1.0-ogm.1",
+  "maintained_branch": "main",
+  "pre_layout_candidate": {
+    "version": "2.0.6-ogm.1",
+    "branch": "ogm/compat",
+    "commit": "05c70b32625bba97691a3902e21f4316cf4689d6"
+  },
   "upstream": {
     "url": "https://github.com/CMB27/ModbusRTUSlave.git",
     "reviewed_head": "83c2b50e32c0d10ea8e300761f1bbd058eb9d1bd",
-    "compatibility_branch_point": "65ae4dd4cf121f42a3a9daa917034e319ebed65e",
-    "compatibility_source_files": {
+    "ogm_branch_point": "65ae4dd4cf121f42a3a9daa917034e319ebed65e",
+    "branch_point_files": {
       "src/ModbusRTUSlave.h": "3a1aabe890727ffe4568661f06e5ec2db0989ae13e7c79318551fe6b011da9bf",
       "src/ModbusRTUSlave.cpp": "4e0d2f8256e5a9c082923f4b8a9065153cc878cbdad5f77dbedc3f96d25f402c"
     }
@@ -26,35 +31,53 @@
       "url": "https://github.com/CMB27/ModbusADU.git",
       "commit": "7cb0e24f0abe86bc83e114325d75fe7a7d878562",
       "tag": "1.0.2",
-      "used_by_compatibility_line": false
+      "used_by_maintained_line": false
     },
     "ModbusSlaveLogic": {
       "url": "https://github.com/CMB27/ModbusSlaveLogic.git",
       "commit": "85b579741c7772588b532f277ded569f9d8fcbeb",
       "tag": "1.0.1",
-      "used_by_compatibility_line": false
+      "used_by_maintained_line": false
     }
   },
-  "ogm_functional_replay": {
-    "status": "software_candidate_consumer_gate_pending",
-    "source_anchor": {
-      "repository": "OGM_slave_core",
-      "commit": "73925642c29a0f419b2b3cb160647dee71f4c078",
-      "files": {
-        "src/Comms/ModbusRTUSlave.h": "cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d",
-        "src/Comms/ModbusRTUSlave.cpp": "7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa",
-        "src/Comms/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e"
-      }
-    },
-    "implementation_commits": [
-      "0e63f6f7bd1e51974a6dbccf18585213d6c57cbe",
-      "a196ec7d5e1e0c6fa84b55f99a4be84a8c442e7e"
-    ],
-    "candidate_files": {
-      "src/Comms/ModbusRTUSlave.h": "cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d",
+  "ogm_functional_source": {
+    "repository": "OGM_slave_core",
+    "commit": "73925642c29a0f419b2b3cb160647dee71f4c078",
+    "files": {
+      "include/Comms/ModbusRTUSlave.h": "cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d",
       "src/Comms/ModbusRTUSlave.cpp": "7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa",
-      "src/Comms/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e",
-      "src/ModbusRTUSlave.h": "9b862a9ab11cea6856715885dc9bb69375c35bae87672d3e027e79a8e58d6c14"
+      "include/Comms/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e"
+    }
+  },
+  "clean_public_layout": {
+    "status": "software_candidate_consumer_gate_pending",
+    "candidate_files": {
+      "src/ModbusRTUSlave.h": "c53562fe91a353b4bbbbf7febd65f826d700d3900f6e6431cc5ec57fa054e687",
+      "src/ModbusRTUSlave.cpp": "506257c11f891e5a839f177dda96b92ffd439232336e082ced3a444486d4c30f",
+      "src/detail/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e"
+    },
+    "allowed_normalized_delta": [
+      "canonical public header and implementation paths",
+      "internal journal moved from Comms to detail",
+      "header include paths updated for the canonical layout",
+      "two inherited trailing spaces removed from the public header",
+      "comment-only RX framing TODO carried from OGM source history"
+    ],
+    "removed_paths": [
+      "src/Comms/ModbusRTUSlave.h",
+      "src/Comms/ModbusRTUSlave.cpp",
+      "src/Comms/ModbusRTUIngressJournal.h"
+    ],
+    "rx_framing_todo": {
+      "source_commit": "0ad325f333204225468d1f7c4ae65a408a1bf87b",
+      "ogm_slave_core_merge": "02b93e2898a5456486d4ee8fbcacde9973526b6d",
+      "status": "documented_inherited_limitation_not_fixed"
+    },
+    "source_delta": {
+      "ogm_executable_lines_changed": 0,
+      "normalized_source_comparison": "canonical paths, two trailing spaces and RX TODO only",
+      "ingress_journal_byte_identical": true,
+      "optimized_bridge_mode_object_parity": "exact"
     },
     "external_ogm_adapter_contracts": {
       "OGM_Portable": {
@@ -73,24 +96,21 @@
         "copied_into_package": false
       }
     },
-    "source_parity": {
-      "ogm_executable_lines_changed": 0,
-      "ogm_executable_files_byte_identical": 3,
-      "public_include_forwarders_added": 1,
-      "historical_upstream_to_ogm_header_numstat": "405 insertions, 10 deletions",
-      "historical_upstream_to_ogm_implementation_numstat": "1503 insertions, 115 deletions"
-    },
     "native_validation": {
-      "source_hash_and_reference_cmp": "passed",
+      "canonical_header_standalone_compile": "passed",
+      "canonical_header_ogm_bridge_compile": "passed",
+      "legacy_comms_include_negative_compile": "passed",
+      "normalized_source_and_reference_cmp": "passed",
       "optimized_bridge_mode_object_parity": "exact",
       "production_characterization_scenarios": 29,
       "production_characterization": "passed",
       "ingress_journal_oracle_tests": 8,
-      "ingress_journal_oracle_checks": 655560,
+      "ingress_journal_oracle_checks_minimum": 655560,
       "ingress_journal_strict_host_cxx11_compile": "passed",
       "ingress_journal_strict_avr_cxx11_compile": "passed",
       "full_package_nano_avr_arduino_cxx11_compile": "passed",
       "strict_performance": "passed",
+      "paired_forwarded_performance_vs_pre_layout": "passed_5_percent_limit",
       "bridge_mode_native_object_bytes": 16144,
       "bridge_pending_native_object_bytes": 76,
       "arduino_nano_avr_example": {
@@ -106,7 +126,7 @@
       "atomically remove or compile-exclude embedded ModbusRTUSlave and ingress-journal sources while adding the immutable package pin",
       "rebuild the exact OGM slave and bridge dependency trees from the ownership-cutover commit",
       "compare post-cutover slave and bridge artifacts, symbols, stack, RAM and flash with the embedded-source baseline",
-      "perform physical slave and bridge RS485 validation before a compatibility release"
+      "perform physical slave and bridge RS485 validation before a release"
     ]
   }
 }

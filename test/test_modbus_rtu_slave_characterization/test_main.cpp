@@ -14,11 +14,11 @@
 #include <vector>
 
 #include "Arduino.h"
-#include "Comms/ModbusRTUSlave.h"
+#include "ModbusRTUSlave.h"
 
 // The production source is compiled directly because test_build_src is off.
 // This keeps the characterization target isolated from the firmware entrypoint.
-#include "../../src/Comms/ModbusRTUSlave.cpp"
+#include "../../src/ModbusRTUSlave.cpp"
 
 namespace {
 

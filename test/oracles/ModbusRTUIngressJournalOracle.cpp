@@ -6,7 +6,7 @@
 #include <new>
 #include <type_traits>
 
-#include "Comms/ModbusRTUIngressJournal.h"
+#include "detail/ModbusRTUIngressJournal.h"
 #include "LegacyModbusIngressJournalReference.h"
 
 namespace AllocationProbe {

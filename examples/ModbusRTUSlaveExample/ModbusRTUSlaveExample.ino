@@ -1,10 +1,12 @@
 /*
   ModbusRTUSlaveExample
 
-  This example demonstrates how to setup and use the ModbusRTUSlave library (https://github.com/CMB27/ModbusRTUSlave).
+  This example demonstrates how to set up and use the OpenGameMaster
+  ModbusRTUSlave fork (https://github.com/Cybergrany/ModbusRTUSlave), derived
+  from CMB27/ModbusRTUSlave.
   It is intended to be used with a second board running ModbusRTUMasterExample from the ModbusRTUMaster library (https://github.com/CMB27/ModbusRTUMaster).
 
-  This program has been succsessfully tested with the following boards:
+  The original example was successfully tested with the following boards:
   - Arduino Giga
   - Arduino Leonardo
   - Arduino Make Your UNO (USB had to be unplugged to work with HardwareSerial)
@@ -46,6 +48,9 @@
   By: C. M. Bulliner
   Last Modified: 2024-06-29
   By: C. M. Bulliner
+
+  Fork integration updated: 2026-08-26
+  By: OpenGameMaster contributors
   
 */
 
