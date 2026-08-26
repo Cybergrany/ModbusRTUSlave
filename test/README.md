@@ -35,7 +35,7 @@ PLATFORMIO_CORE_DIR=/absolute/path/to/a/writable/platformio-core \
 pio test -e native_modbus_tests
 ```
 
-The 30 cases cover:
+The 31 cases cover:
 
 - exact FC 1/2/3/4 responses and FC 5/6/15/16 mutations and acknowledgements;
 - CRC, foreign-unit, exception, malformed targeted-broadcast, and receive

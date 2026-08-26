@@ -75,8 +75,10 @@ Define the needed flags for both the application and the library source:
 | Flag | Effect |
 | --- | --- |
 | `MBUS_RTU_SLAVE_USE_MUTEX` | Enables caller-provided table mutexes. |
+| `MBUS_RTU_SLAVE_MUTEX_HEADER` | Selects the header that defines `PlatformMutex`, `SafePlatformMutex`, and `LockGuard`. Defaults to `"platform/PlatformMutex.h"`. |
 | `MBUS_RTU_SLAVE_WORK_ACCESSORS` | Adds `workState()` and `hasWorkPending()`. |
 | `MBUS_RTU_SLAVE_DIAGNOSTICS` | Adds protocol and timing counters. |
+| `MBUS_RTU_SLAVE_EVENT_CALLBACKS` | Adds an allocation-free callback for parser, protocol, admission, and journal-overflow events. |
 | `MBUS_RTU_SLAVE_PURGE_RX_AFTER_TX` | Discards received bytes after a reply drains. |
 | `MBUS_RTU_SLAVE_BRIDGE_MODE` | Adds the fixed-capacity ingress API. |
 | `MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS=1` | Adds aggregate bridge reply timing counters. |
@@ -90,26 +92,48 @@ with `MBUS_RTU_SLAVE_BRIDGE_MAX_COILS`,
 Build flags that change declarations, object layout, or behavior must be
 defined consistently for the application and the library source.
 
+For example, an application with its own portable lock adapter can enable
+mutex support without occupying the default header path:
+
+```ini
+build_flags =
+    -DMBUS_RTU_SLAVE_USE_MUTEX
+    -DMBUS_RTU_SLAVE_MUTEX_HEADER=\"platform/PlatformLock.h\"
+```
+
 ## Bridge callbacks and ordering
 
 An advanced integration can provide static callbacks for write admission,
-local-range classification, and local-write notification:
+local-range classification, and applied-write notification:
 
 ```cpp
 bool admit(uint16_t start, uint16_t count, bool isCoil,
            bool fireAndForget, uint16_t& context);
 bool isLocal(uint16_t start, uint16_t count, bool isCoil);
-void localWrite(uint16_t start, uint16_t count, bool isCoil);
+void writeApplied(uint16_t start, uint16_t count, bool isCoil);
 
 ModbusRTUSlave::setBridgeAdmissionFn(&admit);
 ModbusRTUSlave::setBridgeLocalRangeFn(&isLocal);
-ModbusRTUSlave::setBridgeLocalWriteFn(&localWrite);
+ModbusRTUSlave::setBridgeWriteAppliedFn(&writeApplied);
 ```
 
 Without an admission callback, non-local writes are admitted with context
 zero. No coil or register address has built-in application meaning. A local
-range bypasses the ingress journal and invokes the local-write callback after
-mutation.
+range bypasses the ingress journal. The applied-write callback, when set, runs
+after every successful local or journalled table mutation and before a unicast
+reply is queued. This lets an integration observe control registers without
+embedding their addresses in the protocol library.
+
+With `MBUS_RTU_SLAVE_EVENT_CALLBACKS`, an integration can also retain error
+accounting outside the protocol library:
+
+```cpp
+void onModbusEvent(uint16_t code, uint16_t units) {
+  // Record, publish, or aggregate the event without logging in the hot path.
+}
+
+ModbusRTUSlave::setEventFn(&onModbusEvent);
+```
 
 For an admitted non-local write, the order is:
 

@@ -207,10 +207,16 @@ struct AdmissionCall {
   uint64_t sequence = 0;
 };
 
-struct LocalWriteCall {
+struct AppliedWriteCall {
   uint16_t start = 0;
   uint16_t count = 0;
   bool isCoil = false;
+  uint64_t sequence = 0;
+};
+
+struct EventCall {
+  uint16_t code = 0;
+  uint16_t units = 0;
   uint64_t sequence = 0;
 };
 
@@ -230,8 +236,9 @@ struct Fixture {
                                  &inputRegisterMutex, &holdingMutex);
     gFixture = this;
     ModbusRTUSlave::setBridgeLocalRangeFn(&Fixture::localRangeThunk);
-    ModbusRTUSlave::setBridgeLocalWriteFn(&Fixture::localWriteThunk);
+    ModbusRTUSlave::setBridgeWriteAppliedFn(&Fixture::appliedWriteThunk);
     ModbusRTUSlave::setBridgeAdmissionFn(&Fixture::admissionThunk);
+    ModbusRTUSlave::setEventFn(&Fixture::eventThunk);
     slave.begin(kUnitId, kBaud, SERIAL_8N1);
     ArduinoTest::clearTrace();
     serial.clearTrace();
@@ -243,15 +250,21 @@ struct Fixture {
     return gFixture && (gFixture->allLocal || start == gFixture->localStart);
   }
 
-  static void localWriteThunk(uint16_t start, uint16_t count, bool isCoil) {
+  static void appliedWriteThunk(uint16_t start, uint16_t count, bool isCoil) {
     if (!gFixture) return;
     if (gFixture->benchmarkMode) {
-      ++gFixture->localWriteCount;
+      ++gFixture->appliedWriteCount;
       return;
     }
     const uint64_t sequence = ArduinoTest::nextEventSequence();
-    ++gFixture->localWriteCount;
-    gFixture->localWrites.push_back({start, count, isCoil, sequence});
+    ++gFixture->appliedWriteCount;
+    gFixture->appliedWrites.push_back({start, count, isCoil, sequence});
+  }
+
+  static void eventThunk(uint16_t code, uint16_t units) {
+    if (!gFixture) return;
+    gFixture->events.push_back(
+        {code, units, ArduinoTest::nextEventSequence()});
   }
 
   static bool admissionThunk(uint16_t start, uint16_t count,
@@ -317,9 +330,10 @@ struct Fixture {
   uint16_t context = 42u;
   bool benchmarkMode = false;
   uint64_t admissionCount = 0;
-  uint64_t localWriteCount = 0;
+  uint64_t appliedWriteCount = 0;
   std::vector<AdmissionCall> admissions;
-  std::vector<LocalWriteCall> localWrites;
+  std::vector<AppliedWriteCall> appliedWrites;
+  std::vector<EventCall> events;
 };
 
 void assertSingleTx(const Fixture& fixture,
@@ -399,6 +413,10 @@ void test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync() {
   TEST_ASSERT_EQUAL_UINT64(badCrc.size() + 4u, fixture.serial.availableCalls);
   TEST_ASSERT_EQUAL_UINT64(badCrc.size(), fixture.serial.readCalls);
   TEST_ASSERT_EQUAL_UINT64(badCrc.size() + 4u, ArduinoTest::microsCalls);
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.events.size());
+  TEST_ASSERT_EQUAL_HEX16(ModbusRTUSlave::kEventCrcMismatch,
+                          fixture.events[0].code);
+  TEST_ASSERT_EQUAL_UINT16(1u, fixture.events[0].units);
   const auto foreign = readRequest(9, 3, 0, 1);
   fixture.transact(foreign);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
@@ -419,6 +437,17 @@ void test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync() {
                            fixture.serial.readCalls);
   TEST_ASSERT_EQUAL_UINT64(badCrc.size() + foreign.size() + good.size() + 14u,
                            ArduinoTest::microsCalls);
+}
+
+void test_short_addressed_frame_reports_one_malformed_event_without_reply() {
+  Fixture fixture;
+  fixture.transact({kUnitId, 3u, 0u});
+
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.events.size());
+  TEST_ASSERT_EQUAL_HEX16(ModbusRTUSlave::kEventMalformedFrame,
+                          fixture.events[0].code);
+  TEST_ASSERT_EQUAL_UINT16(1u, fixture.events[0].units);
 }
 
 void test_all_read_function_wire_images_and_coil_padding_are_stable() {
@@ -583,6 +612,10 @@ void test_exception_wire_images_do_not_mutate_or_enqueue() {
 
   fixture.transact(frame({kUnitId, 0x44, 0, 0, 0, 1}));
   assertSingleTx(fixture, frame({kUnitId, 0xC4, 1}));
+  TEST_ASSERT_EQUAL_UINT32(3u, fixture.events.size());
+  TEST_ASSERT_EQUAL_UINT16(3u, fixture.events[0].code);
+  TEST_ASSERT_EQUAL_UINT16(2u, fixture.events[1].code);
+  TEST_ASSERT_EQUAL_UINT16(1u, fixture.events[2].code);
 }
 
 void test_broadcast_read_is_ignored_and_write_is_durable_without_reply() {
@@ -783,10 +816,12 @@ void test_admission_precedes_mutation_snapshot_and_ack() {
   TEST_ASSERT_EQUAL_UINT64(1u, fixture.admissions[0].sequence);
   TEST_ASSERT_EQUAL_UINT64(4u, fixture.holdingMutex.lastLockSequence);
   TEST_ASSERT_EQUAL_UINT64(7u, fixture.holdingMutex.lastUnlockSequence);
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.appliedWrites.size());
+  TEST_ASSERT_EQUAL_UINT64(8u, fixture.appliedWrites[0].sequence);
   TEST_ASSERT_EQUAL_UINT32(1u, ArduinoTest::pinWrites.size());
   TEST_ASSERT_EQUAL_UINT8(HIGH, ArduinoTest::pinWrites[0].value);
-  TEST_ASSERT_EQUAL_UINT64(8u, ArduinoTest::pinWrites[0].sequence);
-  TEST_ASSERT_EQUAL_UINT64(9u, fixture.serial.lastWriteSequence);
+  TEST_ASSERT_EQUAL_UINT64(9u, ArduinoTest::pinWrites[0].sequence);
+  TEST_ASSERT_EQUAL_UINT64(10u, fixture.serial.lastWriteSequence);
   TEST_ASSERT_TRUE(queueVisibleAtWrite);
   TEST_ASSERT_EQUAL_HEX16(0xBBBBu, valueVisibleAtWrite);
   assertIngressHeader(
@@ -822,6 +857,13 @@ void test_admission_denial_prevents_mutation_and_returns_device_failure() {
                           pending.attributes & ModbusRTUSlave::kBridgeIngressReasonMask);
   TEST_ASSERT_EQUAL_UINT16(77u, pending.context);
   TEST_ASSERT_EQUAL_UINT8(0u, pending.snapshotCount);
+  TEST_ASSERT_EQUAL_UINT32(2u, fixture.events.size());
+  TEST_ASSERT_EQUAL_HEX16(ModbusRTUSlave::kEventBridgeAdmissionRejected,
+                          fixture.events[0].code);
+  TEST_ASSERT_EQUAL_UINT16(1u, fixture.events[0].units);
+  TEST_ASSERT_EQUAL_UINT16(4u, fixture.events[1].code);
+  TEST_ASSERT_TRUE(fixture.events[0].sequence < fixture.serial.lastWriteSequence);
+  TEST_ASSERT_TRUE(fixture.events[1].sequence > fixture.serial.lastWriteSequence);
 }
 
 void test_local_write_bypasses_queue_and_notifies_before_ack() {
@@ -831,8 +873,8 @@ void test_local_write_bypasses_queue_and_notifies_before_ack() {
 
   TEST_ASSERT_TRUE(fixture.coils[12]);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.admissionCount);
-  TEST_ASSERT_EQUAL_UINT32(1u, fixture.localWrites.size());
-  TEST_ASSERT_TRUE(fixture.localWrites[0].sequence < fixture.serial.lastWriteSequence);
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.appliedWrites.size());
+  TEST_ASSERT_TRUE(fixture.appliedWrites[0].sequence < fixture.serial.lastWriteSequence);
   BridgeIngressEntry pending;
   TEST_ASSERT_FALSE(fixture.slave.bridgePeekCoils(pending));
   assertSingleTx(fixture, writeSingle(kUnitId, 5, 12, 0xFF00u));
@@ -846,7 +888,7 @@ void test_bridge_defaults_admit_without_product_policy_or_reserved_coils() {
 
   TEST_ASSERT_TRUE(fixture.coils[0]);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.admissionCount);
-  TEST_ASSERT_EQUAL_UINT64(0u, fixture.localWriteCount);
+  TEST_ASSERT_EQUAL_UINT64(1u, fixture.appliedWriteCount);
   assertSingleTx(fixture, writeSingle(kUnitId, 5, 0, 0xFF00u));
   BridgeIngressEntry entry;
   TEST_ASSERT_TRUE(fixture.slave.bridgePeekCoils(entry));
@@ -956,6 +998,13 @@ void test_source_queue_saturation_rejects_before_mutation_and_records_overflow()
   TEST_ASSERT_EQUAL_UINT8(ModbusRTUSlave::kBridgeDropReasonOverflow,
                           overflow.attributes & ModbusRTUSlave::kBridgeIngressReasonMask);
   TEST_ASSERT_EQUAL_UINT8(0u, overflow.snapshotCount);
+  TEST_ASSERT_EQUAL_UINT32(2u, fixture.events.size());
+  TEST_ASSERT_EQUAL_HEX16(ModbusRTUSlave::kEventBridgeOverflow,
+                          fixture.events[0].code);
+  TEST_ASSERT_EQUAL_UINT16(1u, fixture.events[0].units);
+  TEST_ASSERT_EQUAL_UINT16(4u, fixture.events[1].code);
+  TEST_ASSERT_TRUE(fixture.events[0].sequence < fixture.serial.lastWriteSequence);
+  TEST_ASSERT_TRUE(fixture.events[1].sequence > fixture.serial.lastWriteSequence);
 
   uint16_t previousToken = 0;
   uint16_t queued = 0;
@@ -1332,7 +1381,7 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
                            fixture.serial.availableCalls);
   TEST_ASSERT_EQUAL_UINT64(kSamples * kRequests * 17u,
                            ArduinoTest::microsCalls);
-  TEST_ASSERT_EQUAL_UINT64(kSamples * kRequests, fixture.localWriteCount);
+  TEST_ASSERT_EQUAL_UINT64(kSamples * kRequests, fixture.appliedWriteCount);
   TEST_ASSERT_EQUAL_UINT64(0u, ArduinoTest::delayMicrosecondsCalls);
   TEST_ASSERT_TRUE(requestSamples[kSamples / 2u] <
                    std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1375,7 +1424,8 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
   TEST_ASSERT_NOT_EQUAL(0u, forwardedTokenChecksum);
   TEST_ASSERT_EQUAL_UINT64(kSamples * kForwardedRequests,
                            forwarded.admissionCount);
-  TEST_ASSERT_EQUAL_UINT64(0u, forwarded.localWriteCount);
+  TEST_ASSERT_EQUAL_UINT64(kSamples * kForwardedRequests,
+                           forwarded.appliedWriteCount);
   TEST_ASSERT_EQUAL_UINT64(kSamples * kForwardedRequests,
                            forwarded.serial.writeCalls);
   TEST_ASSERT_EQUAL_UINT64(kSamples * kForwardedRequests,
@@ -1560,6 +1610,7 @@ int main(int, char**) {
   RUN_TEST(test_frame_completes_exactly_at_t35_and_read_wire_image_is_stable);
   RUN_TEST(test_partial_frame_restarts_t35_from_the_last_byte);
   RUN_TEST(test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync);
+  RUN_TEST(test_short_addressed_frame_reports_one_malformed_event_without_reply);
   RUN_TEST(test_all_read_function_wire_images_and_coil_padding_are_stable);
   RUN_TEST(test_single_write_ack_images_mutation_and_snapshots_are_stable);
   RUN_TEST(test_multiple_write_ack_images_mutation_and_snapshots_are_stable);

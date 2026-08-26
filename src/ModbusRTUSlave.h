@@ -18,7 +18,10 @@
 #include "Arduino.h"
 #include "detail/ModbusRTUIngressJournal.h"
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
-#include "platform/PlatformMutex.h"
+#ifndef MBUS_RTU_SLAVE_MUTEX_HEADER
+#define MBUS_RTU_SLAVE_MUTEX_HEADER "platform/PlatformMutex.h"
+#endif
+#include MBUS_RTU_SLAVE_MUTEX_HEADER
 #endif
 //#ifdef __AVR__
 ////#include <SoftwareSerial.h>
@@ -188,6 +191,19 @@ class ModbusRTUSlave {
     const DebugInfo& debugInfo() const { return dbg_; }
 #endif
 
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+    enum EventCode : uint16_t {
+      kEventCrcMismatch = 0x0100U,
+      kEventMalformedFrame = 0x0101U,
+      kEventBridgeOverflow = 0x0102U,
+      kEventBridgeAdmissionRejected = 0x0103U,
+    };
+    // units is one for protocol/parser errors and the affected journal work
+    // unit count for a bridge overflow or rejected admission.
+    using EventFn = void (*)(uint16_t code, uint16_t units);
+    static void setEventFn(EventFn fn);
+#endif
+
 #ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
     enum BridgeDropReason : uint8_t {
       kBridgeDropReasonOverflow = 0,
@@ -229,14 +245,16 @@ class ModbusRTUSlave {
     bool bridgeCommitOverflowCoils(uint16_t sourceToken);
     bool bridgePeekOverflowHolding(BridgeIngressEntry& pending) const;
     bool bridgeCommitOverflowHolding(uint16_t sourceToken);
-    // Optional bridge-local range hook (used by bridge firmware to bypass forwarding).
+    // Optional range policy and applied-write observer. Local ranges bypass
+    // the ingress journal. The observer runs after any successful table
+    // mutation, before a unicast reply is queued.
     using BridgeLocalRangeFn = bool (*)(uint16_t start, uint16_t count, bool isCoil);
-    using BridgeLocalWriteFn = void (*)(uint16_t start, uint16_t count, bool isCoil);
+    using BridgeWriteAppliedFn = void (*)(uint16_t start, uint16_t count, bool isCoil);
     using BridgeAdmissionFn = bool (*)(uint16_t start, uint16_t count,
                                       bool isCoil, bool fireForget,
                                       uint16_t& context);
     static void setBridgeLocalRangeFn(BridgeLocalRangeFn fn);
-    static void setBridgeLocalWriteFn(BridgeLocalWriteFn fn);
+    static void setBridgeWriteAppliedFn(BridgeWriteAppliedFn fn);
     static void setBridgeAdmissionFn(BridgeAdmissionFn fn);
 #endif
 
@@ -374,14 +392,13 @@ class ModbusRTUSlave {
     bool bridgeWriteAllowed(uint16_t start, uint16_t count, bool isCoil, bool ff,
                             uint16_t& context);
     bool bridgeIsLocalRange(uint16_t start, uint16_t count, bool isCoil) const;
-    bool bridgeShouldNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil, bool isLocal) const;
-    void bridgeNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil) const;
+    void bridgeNotifyWriteApplied(uint16_t start, uint16_t count, bool isCoil) const;
     uint16_t bridgeUnitsForCount(uint16_t count, bool isCoil) const;
     void bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count, uint16_t units,
                             uint8_t reason, bool ff, uint16_t context);
     bool bridgeOverflowDequeue(bool isCoil, uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff);
     static BridgeLocalRangeFn _bridgeLocalRangeFn;
-    static BridgeLocalWriteFn _bridgeLocalWriteFn;
+    static BridgeWriteAppliedFn _bridgeWriteAppliedFn;
     static BridgeAdmissionFn _bridgeAdmissionFn;
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
     // Source and diagnostic rings are SPSC across the upstream and bridge
@@ -390,6 +407,12 @@ class ModbusRTUSlave {
     mutable SafePlatformMutex _bridgeSourceQueueMutex;
     mutable SafePlatformMutex _bridgeOverflowQueueMutex;
 #endif
+
+#endif
+
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+    static EventFn _eventFn;
+    static void noteEvent(uint16_t code, uint16_t units = 1U);
 #endif
 
 #if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED

@@ -5,18 +5,31 @@
 #ifdef __AVR__
 #include <avr/pgmspace.h>
 #endif
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+ModbusRTUSlave::EventFn ModbusRTUSlave::_eventFn = nullptr;
+
+void ModbusRTUSlave::setEventFn(EventFn fn){
+  _eventFn = fn;
+}
+
+void ModbusRTUSlave::noteEvent(uint16_t code, uint16_t units){
+  if(_eventFn){
+    _eventFn(code, units ? units : uint16_t(1U));
+  }
+}
+#endif
 #ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
 static constexpr uint8_t kModbusExceptionDeviceFailure = 0x04;
 ModbusRTUSlave::BridgeLocalRangeFn ModbusRTUSlave::_bridgeLocalRangeFn = nullptr;
-ModbusRTUSlave::BridgeLocalWriteFn ModbusRTUSlave::_bridgeLocalWriteFn = nullptr;
+ModbusRTUSlave::BridgeWriteAppliedFn ModbusRTUSlave::_bridgeWriteAppliedFn = nullptr;
 ModbusRTUSlave::BridgeAdmissionFn ModbusRTUSlave::_bridgeAdmissionFn = nullptr;
 
 void ModbusRTUSlave::setBridgeLocalRangeFn(BridgeLocalRangeFn fn){
   _bridgeLocalRangeFn = fn;
 }
 
-void ModbusRTUSlave::setBridgeLocalWriteFn(BridgeLocalWriteFn fn){
-  _bridgeLocalWriteFn = fn;
+void ModbusRTUSlave::setBridgeWriteAppliedFn(BridgeWriteAppliedFn fn){
+  _bridgeWriteAppliedFn = fn;
 }
 
 void ModbusRTUSlave::setBridgeAdmissionFn(BridgeAdmissionFn fn){
@@ -27,16 +40,9 @@ bool ModbusRTUSlave::bridgeIsLocalRange(uint16_t start, uint16_t count, bool isC
   return _bridgeLocalRangeFn && _bridgeLocalRangeFn(start, count, isCoil);
 }
 
-bool ModbusRTUSlave::bridgeShouldNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil, bool isLocal) const{
-  (void)start;
-  (void)count;
-  (void)isCoil;
-  return isLocal;
-}
-
-void ModbusRTUSlave::bridgeNotifyLocalWrite(uint16_t start, uint16_t count, bool isCoil) const{
-  if(_bridgeLocalWriteFn){
-    _bridgeLocalWriteFn(start, count, isCoil);
+void ModbusRTUSlave::bridgeNotifyWriteApplied(uint16_t start, uint16_t count, bool isCoil) const{
+  if(_bridgeWriteAppliedFn){
+    _bridgeWriteAppliedFn(start, count, isCoil);
   }
 }
 #endif
@@ -519,9 +525,7 @@ void ModbusRTUSlave::poll() {
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
-          if(bridgeShouldNotifyLocalWrite(address, 1, true, isLocal)){
-            bridgeNotifyLocalWrite(address, 1, true);
-          }
+          bridgeNotifyWriteApplied(address, 1, true);
 #endif
           return;
         }
@@ -561,9 +565,7 @@ void ModbusRTUSlave::poll() {
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
-          if(bridgeShouldNotifyLocalWrite(address, 1, false, isLocal)){
-            bridgeNotifyLocalWrite(address, 1, false);
-          }
+          bridgeNotifyWriteApplied(address, 1, false);
 #endif
           return;
         }
@@ -609,9 +611,7 @@ void ModbusRTUSlave::poll() {
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
-          if(bridgeShouldNotifyLocalWrite(start, quantity, true, isLocal)){
-            bridgeNotifyLocalWrite(start, quantity, true);
-          }
+          bridgeNotifyWriteApplied(start, quantity, true);
 #endif
           return;
         }
@@ -657,9 +657,7 @@ void ModbusRTUSlave::poll() {
             _exceptionResponse(kModbusExceptionDeviceFailure);
             return;
           }
-          if(bridgeShouldNotifyLocalWrite(start, quantity, false, isLocal)){
-            bridgeNotifyLocalWrite(start, quantity, false);
-          }
+          bridgeNotifyWriteApplied(start, quantity, false);
 #endif
           return;
         }
@@ -882,9 +880,7 @@ void ModbusRTUSlave::_processWriteSingleCoil() {
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
-    if(bridgeShouldNotifyLocalWrite(address, 1, true, isLocal)){
-      bridgeNotifyLocalWrite(address, 1, true);
-    }
+    bridgeNotifyWriteApplied(address, 1, true);
 #endif
 #if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(5U, 1U);
@@ -930,9 +926,7 @@ void ModbusRTUSlave::_processWriteSingleHoldingRegister() {
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
-    if(bridgeShouldNotifyLocalWrite(address, 1, false, isLocal)){
-      bridgeNotifyLocalWrite(address, 1, false);
-    }
+    bridgeNotifyWriteApplied(address, 1, false);
 #endif
 #if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(6U, 1U);
@@ -981,9 +975,7 @@ void ModbusRTUSlave::_processWriteMultipleCoils() {
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
-    if(bridgeShouldNotifyLocalWrite(startAddress, quantity, true, isLocal)){
-      bridgeNotifyLocalWrite(startAddress, quantity, true);
-    }
+    bridgeNotifyWriteApplied(startAddress, quantity, true);
 #endif
 #if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(15U, quantity);
@@ -1032,9 +1024,7 @@ void ModbusRTUSlave::_processWriteMultipleHoldingRegisters() {
       _exceptionResponse(kModbusExceptionDeviceFailure);
       return;
     }
-    if(bridgeShouldNotifyLocalWrite(startAddress, quantity, false, isLocal)){
-      bridgeNotifyLocalWrite(startAddress, quantity, false);
-    }
+    bridgeNotifyWriteApplied(startAddress, quantity, false);
 #endif
 #if MBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS_ENABLED
     bridgeUpstreamTxDiagNoteAccepted(16U, quantity);
@@ -1083,6 +1073,11 @@ bool ModbusRTUSlave::_readRequest() {
     const bool ok = (_crc(_rxNumBytes - 2) ==
                      _bytesToWord(_buf[_rxNumBytes - 1], _buf[_rxNumBytes - 2]));
     if (ok) _rxLen = _rxNumBytes; 
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+    if(!ok){
+      noteEvent(kEventCrcMismatch);
+    }
+#endif
 #ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
     if (_rxNumBytes > dbg_.max_rx_len) dbg_.max_rx_len = _rxNumBytes;
 #endif
@@ -1114,6 +1109,11 @@ bool ModbusRTUSlave::_readRequest() {
 #ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
   if (_rxNumBytes > 0 && _rxNumBytes < 4 && addressed) {
     ++dbg_.short_frames;
+  }
+#endif
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+  if(_rxNumBytes != 0U && addressed){
+    noteEvent(kEventMalformedFrame);
   }
 #endif
   _rxNumBytes = 0;
@@ -1215,6 +1215,9 @@ void ModbusRTUSlave::_exceptionResponse(uint8_t code) {
   _buf[1] |= 0x80;
   _buf[2] = code;
   _writeResponse(3);
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+  noteEvent(code);
+#endif
 }
 
 void ModbusRTUSlave::_clearRxBuffer() {
@@ -1633,6 +1636,13 @@ uint16_t ModbusRTUSlave::bridgeUnitsForCount(uint16_t count, bool isCoil) const{
 void ModbusRTUSlave::bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count,
                                         uint16_t units, uint8_t reason, bool ff,
                                         uint16_t context){
+  const uint16_t normalizedUnits = units ? units : uint16_t(1);
+#ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
+  noteEvent(reason == kBridgeDropReasonAdmissionRejected
+      ? kEventBridgeAdmissionRejected
+      : kEventBridgeOverflow,
+      normalizedUnits);
+#endif
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
@@ -1640,8 +1650,6 @@ void ModbusRTUSlave::bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t co
   volatile uint8_t& head = isCoil ? _bridgeOverflowCoilHead : _bridgeOverflowHrHead;
   volatile uint8_t& tail = isCoil ? _bridgeOverflowCoilTail : _bridgeOverflowHrTail;
   const uint8_t size = kBridgeOverflowQueueSize;
-  const uint16_t normalizedUnits = units ? units : uint16_t(1);
-
   uint8_t curHead = head;
   const uint8_t curTail = tail;
   uint8_t nextTail = static_cast<uint8_t>((curTail + 1U) % size);

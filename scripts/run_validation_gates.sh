@@ -25,7 +25,9 @@ common_host_flags=(
 )
 bridge_profile_flags=(
   -DMBUS_RTU_SLAVE_BRIDGE_MODE -DMBUS_RTU_SLAVE_USE_MUTEX
+  '-DMBUS_RTU_SLAVE_MUTEX_HEADER="platform/PlatformLock.h"'
   -DMBUS_RTU_SLAVE_WORK_ACCESSORS -DMBUS_RTU_SLAVE_DIAGNOSTICS
+  -DMBUS_RTU_SLAVE_EVENT_CALLBACKS
   -DMBUS_RTU_SLAVE_BRIDGE_TX_DIAGNOSTICS=1
 )
 
@@ -38,10 +40,13 @@ bridge_profile_flags=(
 "$host_cxx" "${common_host_flags[@]}" \
   -c src/ModbusRTUSlave.cpp \
   -o "$temporary_dir/package_slave_standalone.o"
+"$host_cxx" "${common_host_flags[@]}" -DMBUS_RTU_SLAVE_EVENT_CALLBACKS \
+  -c src/ModbusRTUSlave.cpp \
+  -o "$temporary_dir/package_slave_event_callbacks.o"
 "$host_cxx" "${common_host_flags[@]}" "${bridge_profile_flags[@]}" \
   -c src/ModbusRTUSlave.cpp \
   -o "$temporary_dir/package_slave_bridge.o"
-echo "public header: standalone and bridge profiles compile"
+echo "public header: standalone, event-callback, and bridge profiles compile"
 
 env -u MBUS_RTU_SLAVE_STRICT_PERFORMANCE \
   -u MBUS_RTU_SLAVE_PERFORMANCE_ONLY \
