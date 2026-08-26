@@ -1,17 +1,19 @@
 # ModbusRTUSlave
 
 > [!IMPORTANT]
-> This branch is the OpenGameMaster compatibility seed, rooted at the exact
-> CMB27 2.x revision used as OGM's slave source base. It contains provenance
-> and package metadata only; the functional OGM replay has not begun. See
-> [OGM_FORK_PROVENANCE.md](OGM_FORK_PROVENANCE.md) before using it.
+> This branch is the OpenGameMaster compatibility line, rooted at the exact
+> CMB27 2.x revision used as OGM's slave source base. The functional source
+> replay is implemented and software-gated, but no OGM consumer or hardware
+> has been cut over. Do not treat it as a release until those remaining gates
+> are recorded against an immutable commit or tag. See
+> [OGM_FORK_PROVENANCE.md](OGM_FORK_PROVENANCE.md).
 
 This repository preserves two intentionally different histories:
 
 | Ref | Purpose | Consumer guidance |
 | --- | --- | --- |
 | `main` | Mirrors the current `CMB27/ModbusRTUSlave` line without OGM changes. | Use to review upstream work, not as an automatic OGM upgrade. |
-| `ogm/compat` | Starts at CMB27 `65ae4dd4cf121f42a3a9daa917034e319ebed65e`, the self-contained 2.x source used as OGM's base. | Replay OGM changes here in small, test-gated commits. Consume only an immutable validated tag or commit. |
+| `ogm/compat` | Starts at CMB27 `65ae4dd4cf121f42a3a9daa917034e319ebed65e`, the self-contained 2.x source used as OGM's base. | Carries the exact OGM functional replay. Consume only an immutable validated tag or commit. |
 
 The exact anchors, source hashes and replay policy are recorded in
 [OGM_FORK_PROVENANCE.md](OGM_FORK_PROVENANCE.md) and
@@ -20,17 +22,24 @@ The exact anchors, source hashes and replay policy are recorded in
 
 ## Compatibility-line status
 
-The seed keeps `src/ModbusRTUSlave.h` and `src/ModbusRTUSlave.cpp` unchanged
-from the historical CMB27 branch point. Package/provenance files have been
-added, but the functional OGM replay has not begun. Check
-`ogm_functional_replay` in `ogm-fork-lock.json` before treating a revision as a
-migration candidate.
+The implementation, public declaration, and neutral ingress journal are
+byte-for-byte copies of `OGM_slave_core`
+`73925642c29a0f419b2b3cb160647dee71f4c078`. They remain under `src/Comms/`
+so the transfer itself changes no executable source. A small top-level header
+preserves the normal `<ModbusRTUSlave.h>` include. Both package manifests use
+the distinct prerelease identity `2.0.6-ogm.1`.
 
-The first OGM import disabled AVR `SoftwareSerial`; later OGM work added
-platform services, synchronization, mutation observation, ingress journaling,
-bridge forwarding support, diagnostics and fixes. None of that behavior is
-claimed by this seed. It will be replayed behind neutral library contracts and
-tested before any OGM consumer switches ownership.
+The 29-case production characterization and 655,560-check journal oracle pin
+wire bytes, CRC/error handling, broadcast silence, admission/mutation/snapshot/
+ACK order, T3.5 and TX boundaries, rollover, fixed object sizes and strict
+same-host performance. The journal passes strict host and AVR C++11 compile
+gates; the complete package and maintained example pass the Nano/AVR Arduino
+C++11 build. PlatformIO packaging also passes. See
+[test/README.md](test/README.md).
+
+No consumer manifest has changed and no hardware acceptance is claimed. Check
+`ogm_functional_replay` in `ogm-fork-lock.json` for the exact evidence and
+remaining gates.
 
 ## Installing a validated compatibility release
 
@@ -56,16 +65,28 @@ lib_deps =
   symlink:///absolute/path/to/ModbusRTUSlave
 ```
 
+> [!WARNING]
+> A consumer cutover must transfer source ownership atomically. In the same
+> consumer change that adds this package, remove or compile-exclude the
+> embedded `include/Comms/ModbusRTUSlave.h`,
+> `src/Comms/ModbusRTUSlave.cpp`, and
+> `include/Comms/ModbusRTUIngressJournal.h`. Leaving the embedded `.cpp` active
+> alongside the package creates competing definitions; include guards do not
+> protect separate translation units. Do not remove OGM-owned adapter headers
+> such as `Pins/SlaveStats.h` or the optional OGM_Portable platform/pin
+> providers.
+
 Before publishing a release, replace the local path with the immutable remote
 revision and rebuild the exact OGM slave, bridge and master dependency trees
 from clean dependency caches.
 
-## Compatibility-seed usage example
+## Compatibility usage example
 
-This historical 2.x implementation owns UART startup. Configure the backing
-arrays before `begin()`, then call `poll()` frequently from the application
-loop. A unit ID of zero is reserved for broadcast requests; configure a normal
-slave with an ID from 1 through 247.
+This implementation owns UART startup. Configure the backing arrays before
+`begin()`, then call both `poll()` and `tx_pump()` frequently. `poll()` queues
+responses without blocking; `tx_pump()` completes drain/flush and returns the
+driver-enable pin low. A unit ID of zero is reserved for broadcast requests;
+configure a normal slave with an ID from 1 through 247.
 
 ```cpp
 #include <Arduino.h>
@@ -88,18 +109,18 @@ void setup() {
   modbus.configureDiscreteInputs(discreteInputs, 16);
   modbus.configureHoldingRegisters(holdingRegisters, 32);
   modbus.configureInputRegisters(inputRegisters, 32);
-  modbus.setResponseDelay(0);
   modbus.begin(kUnitId, kBaud, SERIAL_8N1);
 }
 
 void loop() {
   modbus.poll();
+  modbus.tx_pump();
 }
 ```
 
-This documents the seed API only. The functional replay may add neutral
-extension points while preserving existing OGM call sites; consult the header
-at the pinned release for its exact API.
+See [src/README.md](src/README.md) for targeted broadcasts, optional mutexes,
+bridge ingress callbacks, diagnostics, compile flags, and their ordering
+contracts.
 
 ## OGM compatibility contract
 
@@ -110,7 +131,7 @@ Moving slave protocol ownership into this repository must not change:
   and 16;
 - broadcast mutation-without-response behavior, malformed-frame handling, or
   when backing arrays become visible to OGM observers;
-- inter-character/frame timeout boundaries, response delay, UART write/flush,
+- inter-character/frame timeout boundaries, UART write/flush,
   driver-enable transitions, compensation delay or receive-buffer cleanup;
 - request, mutation, callback, ingress-journal and bridge-forwarding order;
 - lock spans, caller-visible status/diagnostics, fixed-capacity behavior, stack,
@@ -125,8 +146,11 @@ therefore still requires physical validation after its software gates pass.
 
 ## Historical upstream API documentation
 
-The reference below is retained from the CMB27 2.x branch point. The pinned
-source and compatibility contract above are authoritative for extraction work.
+The reference below is retained from the CMB27 2.x branch point. It contains
+known API drift: notably, the OGM line has no `SoftwareSerial` constructor or
+`setResponseDelay()`, and responses require cooperative `tx_pump()` service.
+The pinned source, local example, and compatibility contract above are
+authoritative.
 
 Modbus is an industrial communication protocol. The RTU variant communicates over serial lines such as UART, RS-232, or RS-485. The full details of the Modbus protocol can be found at [modbus.org](https://modbus.org). A good summary can also be found on [Wikipedia](https://en.wikipedia.org/wiki/Modbus).
 
@@ -158,7 +182,7 @@ Problems were encountered with the following board:
 
 
 ## Example
-- [ModbusRTUSlaveExample](https://github.com/CMB27/ModbusRTUSlave/blob/main/examples/ModbusRTUSlaveExample/ModbusRTUSlaveExample.ino)
+- [ModbusRTUSlaveExample](examples/ModbusRTUSlaveExample/ModbusRTUSlaveExample.ino)
 
 
 ## Methods
