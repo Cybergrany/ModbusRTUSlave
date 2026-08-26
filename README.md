@@ -11,9 +11,11 @@ public header:
 
 > [!IMPORTANT]
 > Version `2.1.0-ogm.1` is the clean-layout software candidate. Its behavior is
-> frozen by differential tests and an exact optimized-object comparison, but
-> no OGM consumer or physical RS485 topology has yet been cut over to it. Pin
-> the final reviewed tag or full commit, not a moving branch.
+> frozen by differential tests and an exact optimized-object comparison.
+> `OGM_slave_core` has completed its software ownership cutover at the immutable
+> tuple recorded below; dependent firmware artifact comparison and physical
+> RS485 validation remain pending. Pin the final reviewed tag or full commit,
+> not a moving branch.
 
 ## What this fork adds
 
@@ -93,6 +95,16 @@ layout. This is a source-path cleanup, not a protocol or runtime change.
 An OGM ownership cutover must be atomic: adding this package while leaving an
 embedded `ModbusRTUSlave.cpp` active creates duplicate definitions. Include
 guards cannot protect separate translation units.
+
+The first coordinated cutover is complete in `OGM_slave_core`
+`344d4b05dcf08cf6098f26c4150436a1722b6c79` as package `OGM_Slave` `2.0.0`.
+It pins `OGM_Portable`
+`a9e98e849b4227159be6b3c527b1a32be14394d2` and this library at
+`776b7e0147f495585fd368e10fcd81f81534ba8f`. Its 10/10 OGM policy tests and
+29/29 package-linked Modbus cases passed, together with single-owner symbol,
+strict-performance, and package-hygiene gates. Those are software acceptance
+results; dependent firmware artifacts and real RS485 behavior are not yet
+accepted.
 
 ## Basic usage
 

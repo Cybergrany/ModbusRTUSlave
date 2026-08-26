@@ -139,14 +139,25 @@ The clean-layout candidate passes:
   forwarded-write comparison against the pre-layout candidate;
 - the maintained Nano/AVR C++11 example and PlatformIO package export.
 
-This is sufficient for a coordinated consumer migration with no expected
-runtime delta. It is not hardware acceptance. A release still requires:
+The coordinated software ownership cutover is complete in `OGM_slave_core`
+`344d4b05dcf08cf6098f26c4150436a1722b6c79`, published as `OGM_Slave` `2.0.0`.
+That consumer pins this library at
+`776b7e0147f495585fd368e10fcd81f81534ba8f` and `OGM_Portable` at
+`a9e98e849b4227159be6b3c527b1a32be14394d2`. The reviewed consumer evidence is:
 
-1. atomically remove/compile-exclude the embedded slave implementation and
-   journal while adding an immutable package pin;
-2. rebuild the exact OGM slave and bridge trees and compare artifacts, symbols,
+- 10/10 OGM pin/ordering policy tests;
+- 29/29 package-linked Modbus characterization cases;
+- exactly one packaged `ModbusRTUSlave.cpp` object and one `poll()` definition;
+- strict performance and comparator gates; and
+- a clean `OGM_Slave` archive with no Git/worktree/build metadata or deleted
+  embedded Modbus implementation.
+
+This establishes a singular package owner and a software-valid consumer tuple.
+It is not firmware artifact or hardware acceptance. A release still requires:
+
+1. rebuild the exact dependent OGM slave and bridge trees and compare artifacts, symbols,
    stack, flash and RAM;
-3. validate the resulting consumer on the physical slave/bridge RS485
+2. validate the resulting consumer on the physical slave/bridge RS485
    topology, including compatibility with deployed original slave firmware.
 
 ## Upstream review policy
