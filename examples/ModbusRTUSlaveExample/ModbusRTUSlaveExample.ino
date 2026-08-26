@@ -34,8 +34,8 @@
   - A LED from pin 6 to GND with a 1K ohm series resistor
   - A LED from pin 7 to GND with a 1K ohm series resistor
   - A LED from pin 8 to GND with a 1K ohm series resistor
-  - RX pin (typically pin 0 or pin 10 if using SoftwareSerial) to TX pin of the master/client board
-  - TX pin (typically pin 1 or pin 11 if using SoftwareSerial) to RX pin of the master/client board
+  - RX pin (typically pin 0) to TX pin of the master/client board
+  - TX pin (typically pin 1) to RX pin of the master/client board
   - GND to GND of the master/client board
   - Pin 13 is set up as the driver enable pin. This pin will be HIGH whenever the board is transmitting.
 
@@ -48,15 +48,6 @@
   By: C. M. Bulliner
   
 */
-
-#if __AVR__
-  // Uncomment the following line if you want to use SoftwareSerial on pins 10 and ll; note this only works on AVR boards.
-  //# define USE_SOFTWARE_SERIAL
-#endif
-
-#if defined USE_SOFTWARE_SERIAL
-  #include <SoftwareSerial.h>
-#endif
 
 #include <ModbusRTUSlave.h>
 
@@ -71,19 +62,12 @@ const byte ledPins[4] = {5, 6, 7, 8};
 const byte dePin = 13;
 #endif
 
-#if defined USE_SOFTWARE_SERIAL
-  const byte rxPin = 10;
-  const byte txPin = 11;
-  SoftwareSerial mySerial(rxPin, txPin);
-  ModbusRTUSlave modbus(mySerial, dePin);  // serial port, driver enable pin for rs-485
+#if (defined __AVR_ATmega328P__ || defined __AVR_ATmega168__ || defined __AVR_ATmega1280__ || defined __AVR_ATmega2560__)
+  ModbusRTUSlave modbus(Serial, dePin);  // serial port, driver enable pin for rs-485
+#elif defined ESP32
+  ModbusRTUSlave modbus(Serial0, dePin); // serial port, driver enable pin for rs-485
 #else
-  #if (defined __AVR_ATmega328P__ || defined __AVR_ATmega168__ || defined __AVR_ATmega1280__ || defined __AVR_ATmega2560__)
-    ModbusRTUSlave modbus(Serial, dePin);  // serial port, driver enable pin for rs-485
-  #elif defined ESP32
-    ModbusRTUSlave modbus(Serial0, dePin); // serial port, driver enable pin for rs-485
-  #else
-    ModbusRTUSlave modbus(Serial1, dePin); // serial port, driver enable pin for rs-485
-  #endif
+  ModbusRTUSlave modbus(Serial1, dePin); // serial port, driver enable pin for rs-485
 #endif
 
 bool coils[2];
@@ -120,6 +104,9 @@ void loop() {
   discreteInputs[1] = !digitalRead(buttonPins[1]);
   
   modbus.poll();
+  // Responses are completed cooperatively. Keep this adjacent to poll() so
+  // UART drain and driver-enable timing are serviced on every loop pass.
+  modbus.tx_pump();
 
   analogWrite(ledPins[0], holdingRegisters[0]);
   analogWrite(ledPins[1], holdingRegisters[1]);

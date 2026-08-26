@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "repository": "ModbusRTUSlave",
+  "package_version": "2.0.6-ogm.1",
   "compatibility_branch": "ogm/compat",
   "upstream": {
     "url": "https://github.com/CMB27/ModbusRTUSlave.git",
@@ -25,14 +26,84 @@
       "url": "https://github.com/CMB27/ModbusADU.git",
       "commit": "7cb0e24f0abe86bc83e114325d75fe7a7d878562",
       "tag": "1.0.2",
-      "used_by_compatibility_seed": false
+      "used_by_compatibility_line": false
     },
     "ModbusSlaveLogic": {
       "url": "https://github.com/CMB27/ModbusSlaveLogic.git",
       "commit": "85b579741c7772588b532f277ded569f9d8fcbeb",
       "tag": "1.0.1",
-      "used_by_compatibility_seed": false
+      "used_by_compatibility_line": false
     }
   },
-  "ogm_functional_replay": "not_started"
+  "ogm_functional_replay": {
+    "status": "software_candidate_consumer_gate_pending",
+    "source_anchor": {
+      "repository": "OGM_slave_core",
+      "commit": "73925642c29a0f419b2b3cb160647dee71f4c078",
+      "files": {
+        "src/Comms/ModbusRTUSlave.h": "cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d",
+        "src/Comms/ModbusRTUSlave.cpp": "7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa",
+        "src/Comms/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e"
+      }
+    },
+    "implementation_commits": [
+      "0e63f6f7bd1e51974a6dbccf18585213d6c57cbe",
+      "a196ec7d5e1e0c6fa84b55f99a4be84a8c442e7e"
+    ],
+    "candidate_files": {
+      "src/Comms/ModbusRTUSlave.h": "cc6145185e889a344bfabd7dbb3a591fb5e67cc4f0490b02091e2006ff576c3d",
+      "src/Comms/ModbusRTUSlave.cpp": "7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa",
+      "src/Comms/ModbusRTUIngressJournal.h": "f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e",
+      "src/ModbusRTUSlave.h": "9b862a9ab11cea6856715885dc9bb69375c35bae87672d3e027e79a8e58d6c14"
+    },
+    "external_ogm_adapter_contracts": {
+      "OGM_Portable": {
+        "commit": "2134d8a58c703a6e3392d198590a67eef1c946ed",
+        "files": {
+          "include/platform/PlatformMutex.h": "afe62d231733dcf9422c59f8e76978e97614b4502aebb2d39ef4d7885259a6db",
+          "include/IO/ExternalPins/PinIndexDefines.h": "a38287a11465d4d480e5917b8c24a80cba43e415c0e6cd56831decc7165de01d"
+        },
+        "copied_into_package": false
+      },
+      "OGM_slave_core": {
+        "commit": "73925642c29a0f419b2b3cb160647dee71f4c078",
+        "files": {
+          "include/Pins/SlaveStats.h": "10a65a53ff68253ae73b42acf7e61ab05a25dbd6e59c333f20f041524f3fdc05"
+        },
+        "copied_into_package": false
+      }
+    },
+    "source_parity": {
+      "ogm_executable_lines_changed": 0,
+      "ogm_executable_files_byte_identical": 3,
+      "public_include_forwarders_added": 1,
+      "historical_upstream_to_ogm_header_numstat": "405 insertions, 10 deletions",
+      "historical_upstream_to_ogm_implementation_numstat": "1503 insertions, 115 deletions"
+    },
+    "native_validation": {
+      "source_hash_and_reference_cmp": "passed",
+      "production_characterization_scenarios": 29,
+      "production_characterization": "passed",
+      "ingress_journal_oracle_tests": 8,
+      "ingress_journal_oracle_checks": 655560,
+      "strict_host_cxx11_compile": "passed",
+      "strict_avr_cxx11_compile": "passed",
+      "strict_performance": "passed",
+      "bridge_mode_native_object_bytes": 16144,
+      "bridge_pending_native_object_bytes": 76,
+      "arduino_nano_avr_example": {
+        "status": "passed",
+        "flash_bytes": 5760,
+        "ram_bytes": 505
+      },
+      "platformio_package_pack": "passed"
+    },
+    "consumer_cutover": false,
+    "hardware_validation": false,
+    "remaining_gates": [
+      "cut an immutable candidate pin and rebuild the exact OGM slave and bridge dependency trees",
+      "compare post-cutover slave and bridge artifacts, symbols, stack, RAM and flash with the embedded-source baseline",
+      "perform physical slave and bridge RS485 validation before a compatibility release"
+    ]
+  }
 }
