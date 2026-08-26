@@ -21,6 +21,24 @@ cd "$repo_root"
 
 scripts/check_ogm_source_parity.sh ${OGM_SLAVE_CORE_REFERENCE:+"$OGM_SLAVE_CORE_REFERENCE"}
 
+if [[ -n ${OGM_SLAVE_CORE_REFERENCE:-} ]]; then
+  "$host_cxx" -std=gnu++17 -Os -Wall -Wextra -Werror \
+    -I "$OGM_SLAVE_CORE_REFERENCE/include" \
+    -I "$OGM_SLAVE_CORE_REFERENCE/test/support" \
+    -DOGM_BRIDGE_MODE -DOGM_USE_MUTEX -DOGM_MODBUS_MT_ACCESSORS \
+    -DUSB_DEBUG -DBRIDGE_UPSTREAM_TX_DIAG=1 \
+    -c "$OGM_SLAVE_CORE_REFERENCE/src/Comms/ModbusRTUSlave.cpp" \
+    -o "$temporary_dir/embedded_slave.o"
+  "$host_cxx" -std=gnu++17 -Os -Wall -Wextra -Werror \
+    -I src -I test/support \
+    -DOGM_BRIDGE_MODE -DOGM_USE_MUTEX -DOGM_MODBUS_MT_ACCESSORS \
+    -DUSB_DEBUG -DBRIDGE_UPSTREAM_TX_DIAG=1 \
+    -c src/Comms/ModbusRTUSlave.cpp \
+    -o "$temporary_dir/package_slave.o"
+  cmp "$temporary_dir/embedded_slave.o" "$temporary_dir/package_slave.o"
+  echo "optimized bridge-mode object parity: exact"
+fi
+
 env -u OGM_STRICT_MODBUS_PERF -u OGM_MODBUS_PERF_ONLY \
   PLATFORMIO_CORE_DIR="$pio_core_dir" \
   pio test -e native_modbus_tests

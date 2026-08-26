@@ -51,8 +51,9 @@ visible and reviewable without being reinterpreted during packaging.
 
 The candidate passes the frozen 29-scenario production characterization, the
 655,560-check ingress-journal oracle, strict host and AVR C++11 compiles, fixed
-object-size checks, strict same-host performance ceilings, a Nano/ATmega328
-example build, and PlatformIO package validation. That makes it a software
+object-size checks, an exact independently compiled `-Os` bridge-mode object
+comparison, strict same-host performance ceilings, a Nano/ATmega328 example
+build, and PlatformIO package validation. That makes it a software
 candidate for an isolated consumer cutover. It is not a compatibility release:
 no consumer has switched to it and no slave/bridge hardware validation is
 claimed.

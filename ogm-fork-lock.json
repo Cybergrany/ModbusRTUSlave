@@ -82,6 +82,7 @@
     },
     "native_validation": {
       "source_hash_and_reference_cmp": "passed",
+      "optimized_bridge_mode_object_parity": "exact",
       "production_characterization_scenarios": 29,
       "production_characterization": "passed",
       "ingress_journal_oracle_tests": 8,

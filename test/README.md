@@ -34,6 +34,12 @@ serial port. Its bridge-mode limits match production
 - exact serial/clock/mutex/flush call counts, diagnostic event order, fixed
   host object sizes and generous normal-run performance tripwires.
 
+When `OGM_SLAVE_CORE_REFERENCE` is supplied, the gate also compiles the
+embedded and packaged production translation units independently with the same
+`-Os` bridge/mutex/diagnostic profile and requires their object files to be
+byte-identical. This catches include-resolution or package-layout side effects
+that a source-only comparison could miss.
+
 The journal oracle performs 655,560 deterministic checks against a frozen
 executable model of the pre-extraction two-ring implementation. It also proves
 all-or-nothing reservation, publication invisibility, immutable chunk
