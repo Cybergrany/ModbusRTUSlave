@@ -97,14 +97,16 @@ embedded `ModbusRTUSlave.cpp` active creates duplicate definitions. Include
 guards cannot protect separate translation units.
 
 The first coordinated cutover is complete in `OGM_slave_core`
-`344d4b05dcf08cf6098f26c4150436a1722b6c79` as package `OGM_Slave` `2.0.0`.
-It pins `OGM_Portable`
-`a9e98e849b4227159be6b3c527b1a32be14394d2` and this library at
-`776b7e0147f495585fd368e10fcd81f81534ba8f`. Its 10/10 OGM policy tests and
-29/29 package-linked Modbus cases passed, together with single-owner symbol,
-strict-performance, and package-hygiene gates. Those are software acceptance
-results; dependent firmware artifacts and real RS485 behavior are not yet
-accepted.
+`be16e277132cdf388bf1bc1df9f807fd9c70818a` as package `OGM_Slave` `2.0.0`.
+It pins the private `OGM_Portable` repository through authenticated
+`git+ssh://git@github.com/Cybergrany/OGM_Portable.git` at
+`a9e98e849b4227159be6b3c527b1a32be14394d2`. This public library remains an
+ordinary HTTPS dependency pinned at
+`776b7e0147f495585fd368e10fcd81f81534ba8f`. Fresh validation at that exact
+visibility-aware tuple passed 10/10 OGM policy tests, 29/29 package-linked
+Modbus cases, single-owner symbol checks, strict performance, and package
+hygiene. Those are software acceptance results; dependent firmware artifacts
+and real RS485 behavior are not yet accepted.
 
 ## Basic usage
 

@@ -140,10 +140,13 @@ The clean-layout candidate passes:
 - the maintained Nano/AVR C++11 example and PlatformIO package export.
 
 The coordinated software ownership cutover is complete in `OGM_slave_core`
-`344d4b05dcf08cf6098f26c4150436a1722b6c79`, published as `OGM_Slave` `2.0.0`.
+`be16e277132cdf388bf1bc1df9f807fd9c70818a`, published as `OGM_Slave` `2.0.0`.
 That consumer pins this library at
 `776b7e0147f495585fd368e10fcd81f81534ba8f` and `OGM_Portable` at
-`a9e98e849b4227159be6b3c527b1a32be14394d2`. The reviewed consumer evidence is:
+`a9e98e849b4227159be6b3c527b1a32be14394d2`. Dependency transport matches
+repository visibility: private OGM Portable uses authenticated
+`git+ssh://git@github.com/Cybergrany/OGM_Portable.git`, while public
+ModbusRTUSlave uses HTTPS. The fresh consumer evidence at this exact tuple is:
 
 - 10/10 OGM pin/ordering policy tests;
 - 29/29 package-linked Modbus characterization cases;
