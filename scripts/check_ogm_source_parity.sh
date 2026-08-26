@@ -25,6 +25,8 @@ check_hash src/Comms/ModbusRTUSlave.cpp \
   7844e6f6a1f8a8818f3044af5db07847dc244aa5ae4f2cfa46b73538b68c18aa
 check_hash src/Comms/ModbusRTUIngressJournal.h \
   f9d08a82db5f349610db43115089c9e916e3a59024d0d189ebcbbe9e8eec381e
+check_hash src/ModbusRTUSlave.h \
+  9b862a9ab11cea6856715885dc9bb69375c35bae87672d3e027e79a8e58d6c14
 
 if [[ -n "$reference" ]]; then
   reference=$(cd "$reference" && pwd)

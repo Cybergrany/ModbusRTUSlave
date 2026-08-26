@@ -10,7 +10,8 @@ scripts/run_compatibility_gates.sh
 
 The optional reference must be checked out at
 `73925642c29a0f419b2b3cb160647dee71f4c078`. With no reference argument, the
-gate still checks the three embedded SHA-256 values frozen in
+gate still checks the three embedded-source SHA-256 values and the public
+include-forwarder hash frozen in
 `scripts/check_ogm_source_parity.sh` and `ogm-fork-lock.json`.
 
 ## What is frozen
