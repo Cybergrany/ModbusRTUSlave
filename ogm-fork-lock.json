@@ -157,8 +157,8 @@
       "consumer_tuple": {
         "OGM_Portable": "a9e98e849b4227159be6b3c527b1a32be14394d2",
         "OpenGameMaster_pio": "ad8352a6d50f5059999255e65a564ba4e5321568",
-        "OGM_The_Core": "4bd58a2f612b2c474a0101a9a5841839b70a795a",
-        "OGM_bridge": "41e90c20afa97117e8d12cabdad4e1c430feefe3",
+        "OGM_The_Core": "f97ae9e47583b597eeb5b6ccd2ca7f687696f7d9",
+        "OGM_bridge": "18aaa97e2d97d5acba54face9e8f763a77a0a62c",
         "OGM_slave_core": "be16e277132cdf388bf1bc1df9f807fd9c70818a",
         "OGM_Slave_prod": "06257db337d5d294d093d94f761ef2b114a572b6",
         "ModbusRTUStoreForwardBridge": "d287fa92fd733bbdf4eec6ad3667fb095c224890"
