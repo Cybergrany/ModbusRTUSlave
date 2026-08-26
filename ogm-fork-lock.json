@@ -87,8 +87,9 @@
       "production_characterization": "passed",
       "ingress_journal_oracle_tests": 8,
       "ingress_journal_oracle_checks": 655560,
-      "strict_host_cxx11_compile": "passed",
-      "strict_avr_cxx11_compile": "passed",
+      "ingress_journal_strict_host_cxx11_compile": "passed",
+      "ingress_journal_strict_avr_cxx11_compile": "passed",
+      "full_package_nano_avr_arduino_cxx11_compile": "passed",
       "strict_performance": "passed",
       "bridge_mode_native_object_bytes": 16144,
       "bridge_pending_native_object_bytes": 76,
@@ -102,7 +103,8 @@
     "consumer_cutover": false,
     "hardware_validation": false,
     "remaining_gates": [
-      "cut an immutable candidate pin and rebuild the exact OGM slave and bridge dependency trees",
+      "atomically remove or compile-exclude embedded ModbusRTUSlave and ingress-journal sources while adding the immutable package pin",
+      "rebuild the exact OGM slave and bridge dependency trees from the ownership-cutover commit",
       "compare post-cutover slave and bridge artifacts, symbols, stack, RAM and flash with the embedded-source baseline",
       "perform physical slave and bridge RS485 validation before a compatibility release"
     ]

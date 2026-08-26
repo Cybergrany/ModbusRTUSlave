@@ -13,6 +13,12 @@ of these forms name the same class:
 #include <Comms/ModbusRTUSlave.h>    // temporary OGM migration compatibility
 ```
 
+The compatibility include path is a migration aid, not permission for dual
+ownership. Before a consumer enables this package, its embedded slave header,
+implementation, and ingress-journal copies must be removed or compile-excluded
+in the same change. In particular, never compile both embedded and packaged
+`ModbusRTUSlave.cpp` translation units.
+
 ## Required service loop
 
 Receive parsing and transmit completion are cooperative and nonblocking. Call

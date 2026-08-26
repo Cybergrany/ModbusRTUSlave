@@ -45,7 +45,9 @@ executable model of the pre-extraction two-ring implementation. It also proves
 all-or-nothing reservation, publication invisibility, immutable chunk
 snapshots, custom compatibility records, stale/foreign ticket rejection,
 token rollover, fixed footprint and zero allocation. The same instantiated
-journal is compiled with strict host C++11 and AVR `g++`.
+journal is compiled with strict host C++11 and AVR `g++`. Those two strict
+compile-only results apply to the standalone journal template, not the entire
+Arduino package.
 
 Run only the production characterization suite with:
 
@@ -84,7 +86,8 @@ migration proof; timing comparisons guard compiler/package side effects.
 
 ## Embedded compile and package checks
 
-The maintained example is a strict C++11-capable Nano/AVR compile gate:
+The complete package and maintained example compile under the Nano/AVR Arduino
+toolchain's C++11 settings:
 
 ```sh
 PLATFORMIO_CORE_DIR=/path/to/.platformio_core_portable SCONSFLAGS=-j8 \

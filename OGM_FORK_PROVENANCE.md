@@ -50,10 +50,11 @@ three files compare byte-for-byte. The large historical divergence is therefore
 visible and reviewable without being reinterpreted during packaging.
 
 The candidate passes the frozen 29-scenario production characterization, the
-655,560-check ingress-journal oracle, strict host and AVR C++11 compiles, fixed
+655,560-check ingress-journal oracle, strict host and AVR C++11 compiles of the
+standalone journal, a complete-package Nano/AVR Arduino C++11 build, fixed
 object-size checks, an exact independently compiled `-Os` bridge-mode object
-comparison, strict same-host performance ceilings, a Nano/ATmega328 example
-build, and PlatformIO package validation. That makes it a software
+comparison, strict same-host performance ceilings, and PlatformIO package
+validation. That makes it a software
 candidate for an isolated consumer cutover. It is not a compatibility release:
 no consumer has switched to it and no slave/bridge hardware validation is
 claimed.
@@ -88,9 +89,9 @@ anchor and hashes prevent this thematic summary from concealing a code delta.
    materially different `2.0.6` release identity.
 3. The maintained example removes the unavailable `SoftwareSerial` option,
    calls `tx_pump()` after `poll()`, and documents cooperative TX completion.
-4. Documentation, frozen host fixtures, C++11/AVR compile gates, package
-   checks and performance comparators are added. They do not compile into
-   consumers.
+4. Documentation, frozen host fixtures, strict journal C++11/AVR compile
+   gates, a full-package Nano compile, package checks and performance
+   comparators are added. They do not compile into consumers.
 
 No other transfer delta is intentional. Run
 `scripts/check_ogm_source_parity.sh` to fail closed if a production byte moves.
@@ -168,8 +169,11 @@ following evidence is recorded against one exact dependency tuple:
    trace and hardware timing.
 5. Hot paths, stack, RAM, flash and fixed-capacity behavior are measured on the
    relevant AVR and GIGA consumers.
-6. The exact OGM slave and bridge trees build from clean immutable pins, and
-   their artifacts are compared with the embedded-source baseline.
+6. Source ownership transfers atomically: embedded slave `.h`/`.cpp` and
+   journal copies are removed or compile-excluded in the same consumer change
+   that adds the package. The exact OGM slave and bridge trees then build from
+   clean immutable pins, and their artifacts are compared with the
+   embedded-source baseline.
 7. The candidate runs on the physical slave/bridge RS485 topology. Existing
    deployed slave compatibility remains part of that test.
 

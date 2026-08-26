@@ -32,8 +32,10 @@ the distinct prerelease identity `2.0.6-ogm.1`.
 The 29-case production characterization and 655,560-check journal oracle pin
 wire bytes, CRC/error handling, broadcast silence, admission/mutation/snapshot/
 ACK order, T3.5 and TX boundaries, rollover, fixed object sizes and strict
-same-host performance. Host and AVR C++11 compile gates, a Nano example build,
-and PlatformIO packaging also pass. See [test/README.md](test/README.md).
+same-host performance. The journal passes strict host and AVR C++11 compile
+gates; the complete package and maintained example pass the Nano/AVR Arduino
+C++11 build. PlatformIO packaging also passes. See
+[test/README.md](test/README.md).
 
 No consumer manifest has changed and no hardware acceptance is claimed. Check
 `ogm_functional_replay` in `ogm-fork-lock.json` for the exact evidence and
@@ -62,6 +64,17 @@ changes are tested together:
 lib_deps =
   symlink:///absolute/path/to/ModbusRTUSlave
 ```
+
+> [!WARNING]
+> A consumer cutover must transfer source ownership atomically. In the same
+> consumer change that adds this package, remove or compile-exclude the
+> embedded `include/Comms/ModbusRTUSlave.h`,
+> `src/Comms/ModbusRTUSlave.cpp`, and
+> `include/Comms/ModbusRTUIngressJournal.h`. Leaving the embedded `.cpp` active
+> alongside the package creates competing definitions; include guards do not
+> protect separate translation units. Do not remove OGM-owned adapter headers
+> such as `Pins/SlaveStats.h` or the optional OGM_Portable platform/pin
+> providers.
 
 Before publishing a release, replace the local path with the immutable remote
 revision and rebuild the exact OGM slave, bridge and master dependency trees
