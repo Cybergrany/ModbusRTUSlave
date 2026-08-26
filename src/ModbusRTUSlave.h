@@ -249,7 +249,8 @@ class ModbusRTUSlave {
     // the ingress journal. The observer runs after any successful table
     // mutation, before a unicast reply is queued.
     using BridgeLocalRangeFn = bool (*)(uint16_t start, uint16_t count, bool isCoil);
-    using BridgeWriteAppliedFn = void (*)(uint16_t start, uint16_t count, bool isCoil);
+    using BridgeWriteAppliedFn = void (*)(uint16_t start, uint16_t count,
+                                          bool isCoil, bool isLocal);
     using BridgeAdmissionFn = bool (*)(uint16_t start, uint16_t count,
                                       bool isCoil, bool fireForget,
                                       uint16_t& context);
@@ -392,7 +393,8 @@ class ModbusRTUSlave {
     bool bridgeWriteAllowed(uint16_t start, uint16_t count, bool isCoil, bool ff,
                             uint16_t& context);
     bool bridgeIsLocalRange(uint16_t start, uint16_t count, bool isCoil) const;
-    void bridgeNotifyWriteApplied(uint16_t start, uint16_t count, bool isCoil) const;
+    void bridgeNotifyWriteApplied(uint16_t start, uint16_t count, bool isCoil,
+                                  bool isLocal) const;
     uint16_t bridgeUnitsForCount(uint16_t count, bool isCoil) const;
     void bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count, uint16_t units,
                             uint8_t reason, bool ff, uint16_t context);

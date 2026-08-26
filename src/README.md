@@ -110,7 +110,7 @@ local-range classification, and applied-write notification:
 bool admit(uint16_t start, uint16_t count, bool isCoil,
            bool fireAndForget, uint16_t& context);
 bool isLocal(uint16_t start, uint16_t count, bool isCoil);
-void writeApplied(uint16_t start, uint16_t count, bool isCoil);
+void writeApplied(uint16_t start, uint16_t count, bool isCoil, bool isLocal);
 
 ModbusRTUSlave::setBridgeAdmissionFn(&admit);
 ModbusRTUSlave::setBridgeLocalRangeFn(&isLocal);
@@ -121,8 +121,10 @@ Without an admission callback, non-local writes are admitted with context
 zero. No coil or register address has built-in application meaning. A local
 range bypasses the ingress journal. The applied-write callback, when set, runs
 after every successful local or journalled table mutation and before a unicast
-reply is queued. This lets an integration observe control registers without
-embedding their addresses in the protocol library.
+reply is queued. Its `isLocal` argument is the result of the range callback, so
+an observer can retain a cheap forwarded-write path. This lets an integration
+observe control registers without embedding their addresses in the protocol
+library.
 
 With `MBUS_RTU_SLAVE_EVENT_CALLBACKS`, an integration can also retain error
 accounting outside the protocol library:

@@ -211,6 +211,7 @@ struct AppliedWriteCall {
   uint16_t start = 0;
   uint16_t count = 0;
   bool isCoil = false;
+  bool isLocal = false;
   uint64_t sequence = 0;
 };
 
@@ -250,7 +251,8 @@ struct Fixture {
     return gFixture && (gFixture->allLocal || start == gFixture->localStart);
   }
 
-  static void appliedWriteThunk(uint16_t start, uint16_t count, bool isCoil) {
+  static void appliedWriteThunk(uint16_t start, uint16_t count, bool isCoil,
+                                bool isLocal) {
     if (!gFixture) return;
     if (gFixture->benchmarkMode) {
       ++gFixture->appliedWriteCount;
@@ -258,7 +260,8 @@ struct Fixture {
     }
     const uint64_t sequence = ArduinoTest::nextEventSequence();
     ++gFixture->appliedWriteCount;
-    gFixture->appliedWrites.push_back({start, count, isCoil, sequence});
+    gFixture->appliedWrites.push_back(
+        {start, count, isCoil, isLocal, sequence});
   }
 
   static void eventThunk(uint16_t code, uint16_t units) {
@@ -818,6 +821,7 @@ void test_admission_precedes_mutation_snapshot_and_ack() {
   TEST_ASSERT_EQUAL_UINT64(7u, fixture.holdingMutex.lastUnlockSequence);
   TEST_ASSERT_EQUAL_UINT32(1u, fixture.appliedWrites.size());
   TEST_ASSERT_EQUAL_UINT64(8u, fixture.appliedWrites[0].sequence);
+  TEST_ASSERT_FALSE(fixture.appliedWrites[0].isLocal);
   TEST_ASSERT_EQUAL_UINT32(1u, ArduinoTest::pinWrites.size());
   TEST_ASSERT_EQUAL_UINT8(HIGH, ArduinoTest::pinWrites[0].value);
   TEST_ASSERT_EQUAL_UINT64(9u, ArduinoTest::pinWrites[0].sequence);
@@ -874,6 +878,7 @@ void test_local_write_bypasses_queue_and_notifies_before_ack() {
   TEST_ASSERT_TRUE(fixture.coils[12]);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.admissionCount);
   TEST_ASSERT_EQUAL_UINT32(1u, fixture.appliedWrites.size());
+  TEST_ASSERT_TRUE(fixture.appliedWrites[0].isLocal);
   TEST_ASSERT_TRUE(fixture.appliedWrites[0].sequence < fixture.serial.lastWriteSequence);
   BridgeIngressEntry pending;
   TEST_ASSERT_FALSE(fixture.slave.bridgePeekCoils(pending));
