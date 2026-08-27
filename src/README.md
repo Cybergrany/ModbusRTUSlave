@@ -145,18 +145,37 @@ For an admitted non-local write, the order is:
 4. queue the Modbus reply when the request expects one.
 
 `bridgePeekNext()` preserves acceptance order across coil and holding-register
-rings. Retire an item with `bridgeCommitNext()` only after the destination has
-accepted it, using the exact source token returned by the peek. If the
-destination is full, leave the source item uncommitted.
+rings and returns the selected `BridgeIngressTable`. Retire the item with
+`bridgeCommit()` only after the destination has accepted it, using that table
+and the exact source token returned by the peek. If the destination is full,
+leave the source item uncommitted:
 
-`BridgeIngressEntry` exposes `start`, `count`, caller-defined `context`,
-monotonic `sourceToken`, `units`, `attributes`, `snapshotCount`, and the
-immutable coil or holding-register snapshot. `kBridgeIngressFlagFireForget`
-marks a no-response request;
+```cpp
+ModbusRTUSlave::BridgeIngressEntry entry;
+auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+
+if (slave.bridgePeekNext(entry, table)) {
+  if (destination.tryPush(entry, table)) {
+    // A stale or cross-table token is rejected rather than retiring new work.
+    slave.bridgeCommit(table, entry.sourceToken);
+  }
+}
+```
+
+Use `bridgePeek(table, entry)` when an application intentionally services one
+accepted-write ring at a time. Rejected admission and journal saturation are
+not accepted writes; inspect and retire those diagnostic records separately
+with `bridgePeekDrop()` and `bridgeCommitDrop()`.
+
+`ModbusRTUSlave::BridgeIngressEntry` exposes `start`, `count`, caller-defined
+`context`, monotonic `sourceToken`, `units`, `attributes`, `snapshotCount`, and
+the immutable coil or holding-register snapshot.
+`kBridgeIngressFlagFireForget` marks a no-response targeted broadcast;
 `kBridgeIngressFlagResponseRequired` marks a request whose caller expects a
 response. Rejected admission and full-journal records are available through
-the overflow peek/commit methods with a `BridgeDropReason` in the low bits of
-`attributes`.
+the drop API with a `BridgeDropReason` in the low bits of `attributes`. Drop
+records never imply that the write was acknowledged or that an application
+owes a later completion signal.
 
 ## Ingress journal
 

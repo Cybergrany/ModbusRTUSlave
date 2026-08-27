@@ -50,11 +50,12 @@ static constexpr uint8_t kBridgeQueueSize =
     static_cast<uint8_t>(MBUS_RTU_SLAVE_BRIDGE_QUEUE_SIZE);
 static constexpr uint8_t kBridgeOverflowQueueSize = kBridgeQueueSize;
 
-using BridgeIngressJournal = ModbusRTU::FixedCapacityIngressJournal<
+namespace ModbusRTUSlaveDetail {
+using IngressJournal = ModbusRTU::FixedCapacityIngressJournal<
     MBUS_RTU_SLAVE_BRIDGE_MAX_COILS,
     MBUS_RTU_SLAVE_BRIDGE_MAX_HOLDING_REGISTERS,
     kBridgeQueueSize>;
-using BridgeIngressEntry = BridgeIngressJournal::Entry;
+} // namespace ModbusRTUSlaveDetail
 #endif
 
 // Optional bridge-only diag for the actual master-facing reply path.
@@ -205,6 +206,13 @@ class ModbusRTUSlave {
 #endif
 
 #ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
+    // Durable bridge ingress is intentionally one token-based API. A peek
+    // never removes work; retire the exact token only after the destination
+    // has accepted the copied entry. Table is explicit so callers cannot mix
+    // a coil token with the holding-register ring.
+    using BridgeIngressEntry = ModbusRTUSlaveDetail::IngressJournal::Entry;
+    using BridgeIngressTable = ModbusRTUSlaveDetail::IngressJournal::Table;
+
     enum BridgeDropReason : uint8_t {
       kBridgeDropReasonOverflow = 0,
       kBridgeDropReasonAdmissionRejected = 1,
@@ -213,38 +221,21 @@ class ModbusRTUSlave {
     static constexpr uint8_t kBridgeIngressFlagResponseRequired = 0x40U;
     static constexpr uint8_t kBridgeIngressReasonMask = 0x3FU;
 
-    // Bridge helpers: report pending upstream writes (single or multi) per table.
-    bool bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
-                            uint8_t& snapshotCount, bool snapshot[]);
-    bool bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff);
-    bool bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops);
-    bool bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
-                              uint8_t& snapshotCount, uint16_t snapshot[]);
-    bool bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff);
-    bool bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops);
-    bool bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff);
-    bool bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff);
-    bool bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason);
-    bool bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason);
-    bool bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops);
-    bool bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops);
-    // Convenience check when the caller only needs to know that a drop exists.
-    bool bridgeConsumeOverflow();
-    // Durable source transfer API. Peek copies the current head without
-    // releasing it. Commit succeeds only for the exact token returned by peek.
-    // A destination queue that is full must not call commit.
-    // The combined API preserves accepted order across the separate coil and
-    // holding rings. isCoil identifies the selected ring for exact commit.
-    bool bridgePeekNext(BridgeIngressEntry& pending, bool& isCoil) const;
-    bool bridgeCommitNext(bool isCoil, uint16_t sourceToken);
-    bool bridgePeekCoils(BridgeIngressEntry& pending) const;
-    bool bridgeCommitCoils(uint16_t sourceToken);
-    bool bridgePeekHolding(BridgeIngressEntry& pending) const;
-    bool bridgeCommitHolding(uint16_t sourceToken);
-    bool bridgePeekOverflowCoils(BridgeIngressEntry& pending) const;
-    bool bridgeCommitOverflowCoils(uint16_t sourceToken);
-    bool bridgePeekOverflowHolding(BridgeIngressEntry& pending) const;
-    bool bridgeCommitOverflowHolding(uint16_t sourceToken);
+    // bridgePeekNext() preserves acceptance order across both table rings.
+    // bridgePeek() is useful when an application deliberately services one
+    // table at a time. Both retire through bridgeCommit().
+    bool bridgePeekNext(BridgeIngressEntry& pending,
+                        BridgeIngressTable& table) const;
+    bool bridgePeek(BridgeIngressTable table,
+                    BridgeIngressEntry& pending) const;
+    bool bridgeCommit(BridgeIngressTable table, uint16_t sourceToken);
+
+    // Rejected admission and journal saturation are diagnostic records, not
+    // accepted writes. They therefore have a separate durable queue API and
+    // must never be interpreted as completion debt by a consumer.
+    bool bridgePeekDrop(BridgeIngressTable table,
+                        BridgeIngressEntry& pending) const;
+    bool bridgeCommitDrop(BridgeIngressTable table, uint16_t sourceToken);
     // Optional range policy and applied-write observer. Local ranges bypass
     // the ingress journal. The observer runs after any successful table
     // mutation, before a unicast reply is queued.
@@ -355,8 +346,8 @@ class ModbusRTUSlave {
 #endif
 
 #ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
+    using BridgeIngressJournal = ModbusRTUSlaveDetail::IngressJournal;
     using BridgeIngressReservation = BridgeIngressJournal::Reservation;
-    using BridgeIngressTable = BridgeIngressJournal::Table;
 
     // Only successfully admitted writes enter the source journal. Rejected or
     // saturated writes are retained separately as diagnostic entries.
@@ -398,7 +389,6 @@ class ModbusRTUSlave {
     uint16_t bridgeUnitsForCount(uint16_t count, bool isCoil) const;
     void bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t count, uint16_t units,
                             uint8_t reason, bool ff, uint16_t context);
-    bool bridgeOverflowDequeue(bool isCoil, uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff);
     static BridgeLocalRangeFn _bridgeLocalRangeFn;
     static BridgeWriteAppliedFn _bridgeWriteAppliedFn;
     static BridgeAdmissionFn _bridgeAdmissionFn;
