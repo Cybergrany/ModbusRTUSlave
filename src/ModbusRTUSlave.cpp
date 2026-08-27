@@ -1403,102 +1403,73 @@ bool ModbusRTUSlave::bridgeWriteAllowed(uint16_t start, uint16_t count, bool isC
   return true;
 }
 
-bool ModbusRTUSlave::bridgePeekCoils(BridgeIngressEntry& pending) const{
+MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
+bool ModbusRTUSlave::bridgePeekNext(
+    BridgeIngressEntry& pending, BridgeIngressTable& table) const{
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
-  return _bridgeSourceJournal.peek(BridgeIngressTable::Coils, pending);
+  return _bridgeSourceJournal.peekNext(pending, table);
+}
+
+bool ModbusRTUSlave::bridgePeek(
+    BridgeIngressTable table, BridgeIngressEntry& pending) const{
+#ifdef MBUS_RTU_SLAVE_USE_MUTEX
+  LockGuard queueGuard(_bridgeSourceQueueMutex);
+#endif
+  return _bridgeSourceJournal.peek(table, pending);
 }
 
 MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
-bool ModbusRTUSlave::bridgePeekNext(BridgeIngressEntry& pending, bool& isCoil) const{
+bool ModbusRTUSlave::bridgeCommit(
+    BridgeIngressTable table, uint16_t sourceToken){
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeSourceQueueMutex);
 #endif
-  BridgeIngressTable table = BridgeIngressTable::Coils;
-  if(!_bridgeSourceJournal.peekNext(pending, table)) return false;
-  isCoil = table == BridgeIngressTable::Coils;
-  return true;
+  return _bridgeSourceJournal.retire(table, sourceToken);
 }
 
-MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
-bool ModbusRTUSlave::bridgeCommitNext(bool isCoil, uint16_t sourceToken){
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  return _bridgeSourceJournal.retire(
-      isCoil ? BridgeIngressTable::Coils
-             : BridgeIngressTable::HoldingRegisters,
-      sourceToken);
-}
-
-bool ModbusRTUSlave::bridgeCommitCoils(uint16_t sourceToken){
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  return _bridgeSourceJournal.retire(BridgeIngressTable::Coils, sourceToken);
-}
-
-bool ModbusRTUSlave::bridgePeekHolding(BridgeIngressEntry& pending) const{
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  return _bridgeSourceJournal.peek(
-      BridgeIngressTable::HoldingRegisters, pending);
-}
-
-bool ModbusRTUSlave::bridgeCommitHolding(uint16_t sourceToken){
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  return _bridgeSourceJournal.retire(
-      BridgeIngressTable::HoldingRegisters, sourceToken);
-}
-
-bool ModbusRTUSlave::bridgePeekOverflowCoils(BridgeIngressEntry& pending) const{
+bool ModbusRTUSlave::bridgePeekDrop(
+    BridgeIngressTable table, BridgeIngressEntry& pending) const{
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
-  const uint8_t curHead = _bridgeOverflowCoilHead;
-  if(curHead == _bridgeOverflowCoilTail) return false;
-  memcpy(&pending, &_bridgeOverflowCoilQ[curHead], sizeof(pending));
+  const bool coils = table == BridgeIngressTable::Coils;
+  const uint8_t curHead = coils
+      ? _bridgeOverflowCoilHead
+      : _bridgeOverflowHrHead;
+  const uint8_t curTail = coils
+      ? _bridgeOverflowCoilTail
+      : _bridgeOverflowHrTail;
+  if(curHead == curTail) return false;
+  const BridgeIngressEntry* queue = coils
+      ? _bridgeOverflowCoilQ
+      : _bridgeOverflowHrQ;
+  memcpy(&pending, &queue[curHead], sizeof(pending));
   return pending.sourceToken != 0U;
 }
 
-bool ModbusRTUSlave::bridgeCommitOverflowCoils(uint16_t sourceToken){
+bool ModbusRTUSlave::bridgeCommitDrop(
+    BridgeIngressTable table, uint16_t sourceToken){
 #ifdef MBUS_RTU_SLAVE_USE_MUTEX
   LockGuard queueGuard(_bridgeOverflowQueueMutex);
 #endif
-  const uint8_t curHead = _bridgeOverflowCoilHead;
-  if(curHead == _bridgeOverflowCoilTail || sourceToken == 0U ||
-     _bridgeOverflowCoilQ[curHead].sourceToken != sourceToken){
+  const bool coils = table == BridgeIngressTable::Coils;
+  volatile uint8_t& head = coils
+      ? _bridgeOverflowCoilHead
+      : _bridgeOverflowHrHead;
+  const volatile uint8_t& tail = coils
+      ? _bridgeOverflowCoilTail
+      : _bridgeOverflowHrTail;
+  const BridgeIngressEntry* queue = coils
+      ? _bridgeOverflowCoilQ
+      : _bridgeOverflowHrQ;
+  const uint8_t curHead = head;
+  if(curHead == tail || sourceToken == 0U ||
+     queue[curHead].sourceToken != sourceToken){
     return false;
   }
-  _bridgeOverflowCoilHead = static_cast<uint8_t>(
-      (curHead + 1U) % kBridgeOverflowQueueSize);
-  return true;
-}
-
-bool ModbusRTUSlave::bridgePeekOverflowHolding(BridgeIngressEntry& pending) const{
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeOverflowQueueMutex);
-#endif
-  const uint8_t curHead = _bridgeOverflowHrHead;
-  if(curHead == _bridgeOverflowHrTail) return false;
-  memcpy(&pending, &_bridgeOverflowHrQ[curHead], sizeof(pending));
-  return pending.sourceToken != 0U;
-}
-
-bool ModbusRTUSlave::bridgeCommitOverflowHolding(uint16_t sourceToken){
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeOverflowQueueMutex);
-#endif
-  const uint8_t curHead = _bridgeOverflowHrHead;
-  if(curHead == _bridgeOverflowHrTail || sourceToken == 0U ||
-     _bridgeOverflowHrQ[curHead].sourceToken != sourceToken){
-    return false;
-  }
-  _bridgeOverflowHrHead = static_cast<uint8_t>(
+  head = static_cast<uint8_t>(
       (curHead + 1U) % kBridgeOverflowQueueSize);
   return true;
 }
@@ -1506,112 +1477,7 @@ bool ModbusRTUSlave::bridgeCommitOverflowHolding(uint16_t sourceToken){
 #undef MBUS_RTU_SLAVE_BRIDGE_SPEED_OPT
 #endif
 
-/**
- * TODO: expose for all writable slave types, so this can be polled instead of looping over all
- * pins
- */
 #ifdef MBUS_RTU_SLAVE_BRIDGE_MODE
-bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
-                                        uint8_t& snapshotCount, bool snapshot[]){
-  BridgeIngressEntry pending;
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  if(!_bridgeSourceJournal.peek(BridgeIngressTable::Coils, pending) ||
-     !_bridgeSourceJournal.retire(
-         BridgeIngressTable::Coils, pending.sourceToken)){
-    return false;
-  }
-  start = pending.start;
-  count = pending.count;
-  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
-  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
-  snapshotCount = pending.snapshotCount;
-  if(snapshot && snapshotCount != 0U){
-    memcpy(snapshot, pending.snapshot.coils,
-           snapshotCount * sizeof(bool));
-  }
-  return true;
-}
-
-bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff){
-  uint8_t snapshotCount = 0U;
-  return bridgeConsumeCoils(start, count, ops, ff, snapshotCount, nullptr);
-}
-
-bool ModbusRTUSlave::bridgeConsumeCoils(uint16_t& start, uint16_t& count, uint16_t& ops){
-  bool ff = false;
-  return bridgeConsumeCoils(start, count, ops, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff,
-                                          uint8_t& snapshotCount, uint16_t snapshot[]){
-  BridgeIngressEntry pending;
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeSourceQueueMutex);
-#endif
-  if(!_bridgeSourceJournal.peek(
-      BridgeIngressTable::HoldingRegisters, pending) ||
-     !_bridgeSourceJournal.retire(
-         BridgeIngressTable::HoldingRegisters, pending.sourceToken)){
-    return false;
-  }
-  start = pending.start;
-  count = pending.count;
-  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
-  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
-  snapshotCount = pending.snapshotCount;
-  if(snapshot && snapshotCount != 0U){
-    memcpy(snapshot, pending.snapshot.holding,
-           snapshotCount * sizeof(uint16_t));
-  }
-  return true;
-}
-
-bool ModbusRTUSlave::bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops, bool& ff){
-  uint8_t snapshotCount = 0U;
-  return bridgeConsumeHolding(start, count, ops, ff, snapshotCount, nullptr);
-}
-
-bool ModbusRTUSlave::bridgeConsumeHolding(uint16_t& start, uint16_t& count, uint16_t& ops){
-  bool ff = false;
-  return bridgeConsumeHolding(start, count, ops, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff){
-  return bridgeOverflowDequeue(true, start, count, ops, reason, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff){
-  return bridgeOverflowDequeue(false, start, count, ops, reason, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason){
-  bool ff = false;
-  return bridgeConsumeOverflowCoils(start, count, ops, reason, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason){
-  bool ff = false;
-  return bridgeConsumeOverflowHolding(start, count, ops, reason, ff);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowCoils(uint16_t& start, uint16_t& count, uint16_t& ops){
-  uint8_t reason = kBridgeDropReasonOverflow;
-  return bridgeConsumeOverflowCoils(start, count, ops, reason);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflowHolding(uint16_t& start, uint16_t& count, uint16_t& ops){
-  uint8_t reason = kBridgeDropReasonOverflow;
-  return bridgeConsumeOverflowHolding(start, count, ops, reason);
-}
-
-bool ModbusRTUSlave::bridgeConsumeOverflow(){
-  uint16_t s = 0, c = 0, o = 0;
-  uint8_t r = kBridgeDropReasonOverflow;
-  return bridgeConsumeOverflowCoils(s, c, o, r) || bridgeConsumeOverflowHolding(s, c, o, r);
-}
-
 uint16_t ModbusRTUSlave::bridgeUnitsForCount(uint16_t count, bool isCoil) const{
   // Each journal entry carries one snapshot chunk. The work-unit count tells a
   // consumer how many chunks the original Modbus write produced.
@@ -1677,25 +1543,4 @@ void ModbusRTUSlave::bridgeOverflowPush(bool isCoil, uint16_t start, uint16_t co
   tail = nextTail;
 }
 
-bool ModbusRTUSlave::bridgeOverflowDequeue(bool isCoil, uint16_t& start, uint16_t& count, uint16_t& ops, uint8_t& reason, bool& ff){
-#ifdef MBUS_RTU_SLAVE_USE_MUTEX
-  LockGuard queueGuard(_bridgeOverflowQueueMutex);
-#endif
-  BridgeIngressEntry* q = isCoil ? _bridgeOverflowCoilQ : _bridgeOverflowHrQ;
-  volatile uint8_t& head = isCoil ? _bridgeOverflowCoilHead : _bridgeOverflowHrHead;
-  volatile uint8_t& tail = isCoil ? _bridgeOverflowCoilTail : _bridgeOverflowHrTail;
-  uint8_t curHead = head;
-  const uint8_t curTail = tail;
-  if(curHead == curTail) return false;
-  const BridgeIngressEntry& pending = q[curHead];
-  start = pending.start;
-  count = pending.count;
-  ops = pending.units ? static_cast<uint16_t>(pending.units) : uint16_t(1U);
-  reason = static_cast<uint8_t>(pending.attributes & kBridgeIngressReasonMask);
-  ff = (pending.attributes & kBridgeIngressFlagFireForget) != 0U;
-  curHead = static_cast<uint8_t>(
-      (curHead + 1U) % kBridgeOverflowQueueSize);
-  head = curHead;
-  return true;
-}
 #endif

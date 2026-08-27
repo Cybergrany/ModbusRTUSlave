@@ -347,7 +347,7 @@ void assertSingleTx(const Fixture& fixture,
   }
 }
 
-void assertIngressHeader(const BridgeIngressEntry& pending,
+void assertIngressHeader(const ModbusRTUSlave::BridgeIngressEntry& pending,
                          uint16_t start, uint16_t count,
                          uint16_t context, uint16_t sourceToken,
                          uint8_t expectedAttributes) {
@@ -484,11 +484,11 @@ void test_all_read_function_wire_images_and_coil_padding_are_stable() {
 
 void test_single_write_ack_images_mutation_and_snapshots_are_stable() {
   Fixture fixture;
-  BridgeIngressEntry coilAtAck;
+  ModbusRTUSlave::BridgeIngressEntry coilAtAck;
   bool coilQueueVisibleAtAck = false;
   bool coilValueAtAck = false;
   fixture.serial.onWrite = [&]() {
-    coilQueueVisibleAtAck = fixture.slave.bridgePeekCoils(coilAtAck);
+    coilQueueVisibleAtAck = fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, coilAtAck);
     coilValueAtAck = fixture.coils[3];
   };
   fixture.transact(writeSingle(kUnitId, 5, 3, 0xFF00u));
@@ -497,24 +497,24 @@ void test_single_write_ack_images_mutation_and_snapshots_are_stable() {
   TEST_ASSERT_TRUE(coilQueueVisibleAtAck);
   TEST_ASSERT_TRUE(coilValueAtAck);
   TEST_ASSERT_TRUE(coilAtAck.snapshot.coils[0]);
-  BridgeIngressEntry pending;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekCoils(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   TEST_ASSERT_EQUAL_UINT16(3u, pending.start);
   TEST_ASSERT_EQUAL_UINT8(1u, pending.snapshotCount);
   TEST_ASSERT_TRUE(pending.snapshot.coils[0]);
   TEST_ASSERT_BITS_HIGH(ModbusRTUSlave::kBridgeIngressFlagResponseRequired, pending.attributes);
   fixture.coils[3] = false;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekCoils(pending));
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   TEST_ASSERT_TRUE(pending.snapshot.coils[0]);
   fixture.finishTx();
 
   Fixture holdingFixture;
-  BridgeIngressEntry holdingAtAck;
+  ModbusRTUSlave::BridgeIngressEntry holdingAtAck;
   bool holdingQueueVisibleAtAck = false;
   uint16_t holdingValueAtAck = 0;
   holdingFixture.serial.onWrite = [&]() {
     holdingQueueVisibleAtAck =
-        holdingFixture.slave.bridgePeekHolding(holdingAtAck);
+        holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, holdingAtAck);
     holdingValueAtAck = holdingFixture.holding[4];
   };
   holdingFixture.transact(writeSingle(kUnitId, 6, 4, 0xCAFEu));
@@ -523,10 +523,10 @@ void test_single_write_ack_images_mutation_and_snapshots_are_stable() {
   TEST_ASSERT_TRUE(holdingQueueVisibleAtAck);
   TEST_ASSERT_EQUAL_HEX16(0xCAFEu, holdingValueAtAck);
   TEST_ASSERT_EQUAL_HEX16(0xCAFEu, holdingAtAck.snapshot.holding[0]);
-  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_HEX16(0xCAFEu, pending.snapshot.holding[0]);
   holdingFixture.holding[4] = 0x0BADu;
-  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_HEX16(0xCAFEu, pending.snapshot.holding[0]);
 }
 
@@ -534,11 +534,11 @@ void test_multiple_write_ack_images_mutation_and_snapshots_are_stable() {
   Fixture coilFixture;
   const std::vector<bool> coilValues{true, false, true, true, false,
                                      false, true, false, true};
-  BridgeIngressEntry coilsAtAck;
+  ModbusRTUSlave::BridgeIngressEntry coilsAtAck;
   bool coilQueueVisibleAtAck = false;
   std::array<bool, 9> coilImageAtAck{};
   coilFixture.serial.onWrite = [&]() {
-    coilQueueVisibleAtAck = coilFixture.slave.bridgePeekCoils(coilsAtAck);
+    coilQueueVisibleAtAck = coilFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, coilsAtAck);
     for (std::size_t i = 0; i < coilImageAtAck.size(); ++i) {
       coilImageAtAck[i] = coilFixture.coils[10 + i];
     }
@@ -550,27 +550,27 @@ void test_multiple_write_ack_images_mutation_and_snapshots_are_stable() {
   }
   TEST_ASSERT_TRUE(coilQueueVisibleAtAck);
   assertSingleTx(coilFixture, frame({kUnitId, 15, 0, 10, 0, 9}));
-  BridgeIngressEntry pending;
-  TEST_ASSERT_TRUE(coilFixture.slave.bridgePeekCoils(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_TRUE(coilFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   TEST_ASSERT_EQUAL_UINT8(coilValues.size(), pending.snapshotCount);
   for (std::size_t i = 0; i < coilValues.size(); ++i) {
     TEST_ASSERT_EQUAL(coilValues[i], pending.snapshot.coils[i]);
     TEST_ASSERT_EQUAL(coilValues[i], coilsAtAck.snapshot.coils[i]);
     coilFixture.coils[10 + i] = !coilValues[i];
   }
-  TEST_ASSERT_TRUE(coilFixture.slave.bridgePeekCoils(pending));
+  TEST_ASSERT_TRUE(coilFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   for (std::size_t i = 0; i < coilValues.size(); ++i) {
     TEST_ASSERT_EQUAL(coilValues[i], pending.snapshot.coils[i]);
   }
 
   Fixture holdingFixture;
   const std::vector<uint16_t> values{0x1111u, 0x2222u, 0x3333u};
-  BridgeIngressEntry holdingAtAck;
+  ModbusRTUSlave::BridgeIngressEntry holdingAtAck;
   bool holdingQueueVisibleAtAck = false;
   std::array<uint16_t, 3> holdingImageAtAck{};
   holdingFixture.serial.onWrite = [&]() {
     holdingQueueVisibleAtAck =
-        holdingFixture.slave.bridgePeekHolding(holdingAtAck);
+        holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, holdingAtAck);
     for (std::size_t i = 0; i < holdingImageAtAck.size(); ++i) {
       holdingImageAtAck[i] = holdingFixture.holding[6 + i];
     }
@@ -582,7 +582,7 @@ void test_multiple_write_ack_images_mutation_and_snapshots_are_stable() {
   }
   TEST_ASSERT_TRUE(holdingQueueVisibleAtAck);
   assertSingleTx(holdingFixture, frame({kUnitId, 16, 0, 6, 0, 3}));
-  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_UINT8(values.size(), pending.snapshotCount);
   TEST_ASSERT_EQUAL_UINT16_ARRAY(values.data(), pending.snapshot.holding,
                                  values.size());
@@ -591,7 +591,7 @@ void test_multiple_write_ack_images_mutation_and_snapshots_are_stable() {
   for (std::size_t i = 0; i < values.size(); ++i) {
     holdingFixture.holding[6 + i] = static_cast<uint16_t>(0x9000u + i);
   }
-  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(holdingFixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_UINT16_ARRAY(values.data(), pending.snapshot.holding,
                                  values.size());
 }
@@ -602,9 +602,9 @@ void test_exception_wire_images_do_not_mutate_or_enqueue() {
   fixture.transact(writeSingle(kUnitId, 5, 3, 0x1234u));
   TEST_ASSERT_FALSE(fixture.coils[3]);
   assertSingleTx(fixture, frame({kUnitId, static_cast<uint8_t>(0x80u | 5u), 3}));
-  BridgeIngressEntry pending;
-  bool isCoil = false;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, isCoil));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, table));
   fixture.finishTx();
   fixture.serial.writes.clear();
 
@@ -644,13 +644,13 @@ void test_broadcast_read_is_ignored_and_write_is_durable_without_reply() {
   TEST_ASSERT_EQUAL_UINT64(1u, fixture.admissionCount);
   TEST_ASSERT_EQUAL_UINT64(1u, fixture.holdingMutex.lockCount);
   TEST_ASSERT_EQUAL_UINT64(1u, fixture.holdingMutex.unlockCount);
-  BridgeIngressEntry pending;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekHolding(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_FALSE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagFireForget) != 0u);
   TEST_ASSERT_FALSE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagResponseRequired) != 0u);
   TEST_ASSERT_EQUAL_UINT16(fixture.context, pending.context);
   fixture.holding[5] = 0x3333u;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_HEX16(0x2222u, pending.snapshot.holding[0]);
 }
 
@@ -667,10 +667,10 @@ void test_denied_ordinary_broadcast_is_silent_and_nonmutating() {
   TEST_ASSERT_EQUAL_HEX16(0x1111U, fixture.holding[7]);
   TEST_ASSERT_EQUAL_UINT64(0U, fixture.holdingMutex.lockCount);
   TEST_ASSERT_EQUAL_UINT64(1U, fixture.admissionCount);
-  BridgeIngressEntry source;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekHolding(source));
-  BridgeIngressEntry dropped;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekOverflowHolding(dropped));
+  ModbusRTUSlave::BridgeIngressEntry source;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, source));
+  ModbusRTUSlave::BridgeIngressEntry dropped;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, dropped));
   TEST_ASSERT_EQUAL_UINT16(7U, dropped.start);
   TEST_ASSERT_EQUAL_UINT16(1U, dropped.count);
   TEST_ASSERT_EQUAL_UINT16(73U, dropped.context);
@@ -690,17 +690,17 @@ void test_targeted_broadcast_filters_target_and_length_then_snapshots_fire_forge
 
   fixture.transact(targetedWrite(8, 6, {0, 8, 0x20, 0x00}));
   TEST_ASSERT_EQUAL_HEX16(0x1000u, fixture.holding[8]);
-  BridgeIngressEntry pending;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekHolding(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
 
   fixture.transact(targetedWrite(kUnitId, 15, {0, 8, 0, 9, 1, 0xFF}));
   TEST_ASSERT_FALSE(fixture.coils[8]);
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekCoils(pending));
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
 
   fixture.transact(targetedWrite(kUnitId, 6, {0, 8, 0xBE, 0xEF}));
   TEST_ASSERT_EQUAL_HEX16(0xBEEFu, fixture.holding[8]);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekHolding(pending));
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_TRUE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagFireForget) != 0u);
   TEST_ASSERT_FALSE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagResponseRequired) != 0u);
   TEST_ASSERT_EQUAL_HEX16(0xBEEFu, pending.snapshot.holding[0]);
@@ -749,20 +749,22 @@ void test_targeted_broadcast_all_inner_writes_preserve_cross_table_order() {
       {true, 11u, 6u}, {false, 11u, 7u},
       {true, 30u, 8u}, {false, 30u, 9u}}};
   for (const auto& item : expected) {
-    BridgeIngressEntry pending;
-    bool isCoil = false;
-    TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, isCoil));
-    TEST_ASSERT_EQUAL(item.isCoil, isCoil);
+    ModbusRTUSlave::BridgeIngressEntry pending;
+    auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+    TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, table));
+    TEST_ASSERT_EQUAL(
+        item.isCoil,
+        table == ModbusRTUSlave::BridgeIngressTable::Coils);
     TEST_ASSERT_EQUAL_UINT16(item.start, pending.start);
     TEST_ASSERT_EQUAL_UINT16(item.token, pending.sourceToken);
     TEST_ASSERT_EQUAL_UINT8(1u, pending.units);
     TEST_ASSERT_TRUE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagFireForget) != 0u);
     TEST_ASSERT_FALSE((pending.attributes & ModbusRTUSlave::kBridgeIngressFlagResponseRequired) != 0u);
-    TEST_ASSERT_TRUE(fixture.slave.bridgeCommitNext(isCoil, pending.sourceToken));
+    TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(table, pending.sourceToken));
   }
-  BridgeIngressEntry empty;
-  bool emptyIsCoil = false;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(empty, emptyIsCoil));
+  ModbusRTUSlave::BridgeIngressEntry empty;
+  auto emptyTable = ModbusRTUSlave::BridgeIngressTable::Coils;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(empty, emptyTable));
 }
 
 void test_unicast_targeted_broadcast_is_illegal_and_has_no_side_effect() {
@@ -771,9 +773,9 @@ void test_unicast_targeted_broadcast_is_illegal_and_has_no_side_effect() {
   fixture.transact(frame({kUnitId, 69, kUnitId, 6, 0, 2, 0xAB, 0xCD}));
   TEST_ASSERT_EQUAL_HEX16(0x0102u, fixture.holding[2]);
   assertSingleTx(fixture, frame({kUnitId, static_cast<uint8_t>(0x80u | 69u), 1}));
-  BridgeIngressEntry pending;
-  bool isCoil = false;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, isCoil));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, table));
 }
 
 void test_targeted_broadcast_denial_is_silent_nonmutating_and_records_ff_drop() {
@@ -786,8 +788,8 @@ void test_targeted_broadcast_denial_is_silent_nonmutating_and_records_ff_drop() 
   TEST_ASSERT_EQUAL_HEX16(0x1111u, fixture.holding[9]);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.holdingMutex.lockCount);
-  BridgeIngressEntry overflow;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekOverflowHolding(overflow));
+  ModbusRTUSlave::BridgeIngressEntry overflow;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, overflow));
   TEST_ASSERT_EQUAL_UINT8(ModbusRTUSlave::kBridgeDropReasonAdmissionRejected,
                           overflow.attributes & ModbusRTUSlave::kBridgeIngressReasonMask);
   TEST_ASSERT_TRUE((overflow.attributes & ModbusRTUSlave::kBridgeIngressFlagFireForget) != 0u);
@@ -799,9 +801,9 @@ void test_admission_precedes_mutation_snapshot_and_ack() {
   fixture.holding[2] = 0xAAAAu;
   bool queueVisibleAtWrite = false;
   uint16_t valueVisibleAtWrite = 0;
-  BridgeIngressEntry pendingAtWrite;
+  ModbusRTUSlave::BridgeIngressEntry pendingAtWrite;
   fixture.serial.onWrite = [&]() {
-    queueVisibleAtWrite = fixture.slave.bridgePeekHolding(pendingAtWrite);
+    queueVisibleAtWrite = fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pendingAtWrite);
     valueVisibleAtWrite = fixture.holding[2];
   };
 
@@ -837,8 +839,8 @@ void test_admission_precedes_mutation_snapshot_and_ack() {
   // The transfer payload is an immutable admission-time image, not a later
   // view of the shared holding-register table.
   fixture.holding[2] = 0xCCCCu;
-  BridgeIngressEntry durable;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekHolding(durable));
+  ModbusRTUSlave::BridgeIngressEntry durable;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, durable));
   TEST_ASSERT_EQUAL_UINT16(pendingAtWrite.sourceToken, durable.sourceToken);
   TEST_ASSERT_EQUAL_HEX16(0xBBBBu, durable.snapshot.holding[0]);
 }
@@ -854,9 +856,9 @@ void test_admission_denial_prevents_mutation_and_returns_device_failure() {
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.holdingMutex.lockCount);
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.holdingMutex.unlockCount);
   assertSingleTx(fixture, frame({kUnitId, static_cast<uint8_t>(0x80u | 6u), 4}));
-  BridgeIngressEntry pending;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekHolding(pending));
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekOverflowHolding(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_UINT8(ModbusRTUSlave::kBridgeDropReasonAdmissionRejected,
                           pending.attributes & ModbusRTUSlave::kBridgeIngressReasonMask);
   TEST_ASSERT_EQUAL_UINT16(77u, pending.context);
@@ -880,8 +882,8 @@ void test_local_write_bypasses_queue_and_notifies_before_ack() {
   TEST_ASSERT_EQUAL_UINT32(1u, fixture.appliedWrites.size());
   TEST_ASSERT_TRUE(fixture.appliedWrites[0].isLocal);
   TEST_ASSERT_TRUE(fixture.appliedWrites[0].sequence < fixture.serial.lastWriteSequence);
-  BridgeIngressEntry pending;
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekCoils(pending));
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   assertSingleTx(fixture, writeSingle(kUnitId, 5, 12, 0xFF00u));
 }
 
@@ -895,8 +897,8 @@ void test_bridge_defaults_admit_without_product_policy_or_reserved_coils() {
   TEST_ASSERT_EQUAL_UINT64(0u, fixture.admissionCount);
   TEST_ASSERT_EQUAL_UINT64(1u, fixture.appliedWriteCount);
   assertSingleTx(fixture, writeSingle(kUnitId, 5, 0, 0xFF00u));
-  BridgeIngressEntry entry;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekCoils(entry));
+  ModbusRTUSlave::BridgeIngressEntry entry;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::Coils, entry));
   assertIngressHeader(
       entry, 0u, 1u, 0u, 2u,
       ModbusRTUSlave::kBridgeIngressFlagResponseRequired);
@@ -918,38 +920,42 @@ void test_combined_source_queue_preserves_cross_table_order_and_exact_commit() {
   fixture.coils[2] = false;
   fixture.holding[3] = 0xA003u;
 
-  BridgeIngressEntry pending;
-  bool isCoil = true;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, isCoil));
-  TEST_ASSERT_FALSE(isCoil);
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+                    table);
   assertIngressHeader(
       pending, 1u, 1u, fixture.context, 2u,
       ModbusRTUSlave::kBridgeIngressFlagResponseRequired);
   TEST_ASSERT_EQUAL_HEX16(0x1111u, pending.snapshot.holding[0]);
   const uint16_t firstToken = pending.sourceToken;
-  TEST_ASSERT_FALSE(fixture.slave.bridgeCommitNext(false, firstToken + 1u));
-  BridgeIngressEntry unchanged;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(unchanged, isCoil));
+  TEST_ASSERT_FALSE(fixture.slave.bridgeCommit(
+      ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+      firstToken + 1u));
+  ModbusRTUSlave::BridgeIngressEntry unchanged;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(unchanged, table));
   TEST_ASSERT_EQUAL_UINT16(firstToken, unchanged.sourceToken);
   TEST_ASSERT_EQUAL_HEX16(0x1111u, unchanged.snapshot.holding[0]);
-  TEST_ASSERT_TRUE(fixture.slave.bridgeCommitNext(false, firstToken));
+  TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(table, firstToken));
 
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, isCoil));
-  TEST_ASSERT_TRUE(isCoil);
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::Coils, table);
   assertIngressHeader(
       pending, 2u, 1u, fixture.context, 3u,
       ModbusRTUSlave::kBridgeIngressFlagResponseRequired);
   TEST_ASSERT_TRUE(pending.snapshot.coils[0]);
-  TEST_ASSERT_TRUE(fixture.slave.bridgeCommitNext(true, pending.sourceToken));
+  TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(table, pending.sourceToken));
 
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, isCoil));
-  TEST_ASSERT_FALSE(isCoil);
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(pending, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+                    table);
   assertIngressHeader(
       pending, 3u, 1u, fixture.context, 4u,
       ModbusRTUSlave::kBridgeIngressFlagResponseRequired);
   TEST_ASSERT_EQUAL_HEX16(0x3333u, pending.snapshot.holding[0]);
-  TEST_ASSERT_TRUE(fixture.slave.bridgeCommitNext(false, pending.sourceToken));
-  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, isCoil));
+  TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(table, pending.sourceToken));
+  TEST_ASSERT_FALSE(fixture.slave.bridgePeekNext(pending, table));
 }
 
 void test_large_write_chunks_snapshots_without_reordering_or_flag_duplication() {
@@ -958,19 +964,20 @@ void test_large_write_chunks_snapshots_without_reordering_or_flag_duplication() 
   for (uint16_t i = 0; i < values.size(); ++i) values[i] = 0x4000u + i;
   fixture.transact(writeMultipleHolding(kUnitId, 10, values));
 
-  BridgeIngressEntry first;
-  BridgeIngressEntry second;
-  bool isCoil = true;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(first, isCoil));
-  TEST_ASSERT_FALSE(isCoil);
+  ModbusRTUSlave::BridgeIngressEntry first;
+  ModbusRTUSlave::BridgeIngressEntry second;
+  auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(first, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+                    table);
   TEST_ASSERT_EQUAL_UINT16(10u, first.start);
   TEST_ASSERT_EQUAL_UINT16(32u, first.count);
   TEST_ASSERT_EQUAL_UINT8(32u, first.snapshotCount);
   TEST_ASSERT_EQUAL_UINT8(1u, first.units);
   TEST_ASSERT_TRUE((first.attributes & ModbusRTUSlave::kBridgeIngressFlagResponseRequired) != 0u);
-  TEST_ASSERT_TRUE(fixture.slave.bridgeCommitNext(false, first.sourceToken));
+  TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(table, first.sourceToken));
 
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(second, isCoil));
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekNext(second, table));
   TEST_ASSERT_EQUAL_UINT16(42u, second.start);
   TEST_ASSERT_EQUAL_UINT16(1u, second.count);
   TEST_ASSERT_EQUAL_UINT8(1u, second.snapshotCount);
@@ -987,8 +994,8 @@ void test_source_queue_saturation_rejects_before_mutation_and_records_overflow()
   bool overflowVisibleAtReply = false;
   uint16_t valueVisibleAtReply = 0;
   fixture.serial.onWrite = [&]() {
-    BridgeIngressEntry overflow;
-    overflowVisibleAtReply = fixture.slave.bridgePeekOverflowHolding(overflow);
+    ModbusRTUSlave::BridgeIngressEntry overflow;
+    overflowVisibleAtReply = fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, overflow);
     valueVisibleAtReply = fixture.holding[20];
   };
   fixture.transact(writeSingle(kUnitId, 6, 20, 0xFFFFu));
@@ -997,8 +1004,8 @@ void test_source_queue_saturation_rejects_before_mutation_and_records_overflow()
   TEST_ASSERT_TRUE(overflowVisibleAtReply);
   TEST_ASSERT_EQUAL_HEX16(acceptedValue, valueVisibleAtReply);
   assertSingleTx(fixture, frame({kUnitId, static_cast<uint8_t>(0x80u | 6u), 4}));
-  BridgeIngressEntry overflow;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekOverflowHolding(overflow));
+  ModbusRTUSlave::BridgeIngressEntry overflow;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, overflow));
   TEST_ASSERT_EQUAL_UINT16(20u, overflow.start);
   TEST_ASSERT_EQUAL_UINT8(ModbusRTUSlave::kBridgeDropReasonOverflow,
                           overflow.attributes & ModbusRTUSlave::kBridgeIngressReasonMask);
@@ -1013,11 +1020,11 @@ void test_source_queue_saturation_rejects_before_mutation_and_records_overflow()
 
   uint16_t previousToken = 0;
   uint16_t queued = 0;
-  BridgeIngressEntry pending;
-  while (fixture.slave.bridgePeekHolding(pending)) {
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  while (fixture.slave.bridgePeek(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending)) {
     TEST_ASSERT_TRUE(previousToken == 0u || pending.sourceToken > previousToken);
     previousToken = pending.sourceToken;
-    TEST_ASSERT_TRUE(fixture.slave.bridgeCommitHolding(pending.sourceToken));
+    TEST_ASSERT_TRUE(fixture.slave.bridgeCommit(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending.sourceToken));
     ++queued;
   }
   TEST_ASSERT_EQUAL_UINT16(kBridgeQueueSize - 1u, queued);
@@ -1037,8 +1044,8 @@ void test_multi_chunk_capacity_is_reserved_before_any_mutation() {
     TEST_ASSERT_EQUAL_HEX16(0xAAAAu, fixture.holding[40u + i]);
   }
   assertSingleTx(fixture, frame({kUnitId, static_cast<uint8_t>(0x80u | 16u), 4}));
-  BridgeIngressEntry overflow;
-  TEST_ASSERT_TRUE(fixture.slave.bridgePeekOverflowHolding(overflow));
+  ModbusRTUSlave::BridgeIngressEntry overflow;
+  TEST_ASSERT_TRUE(fixture.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, overflow));
   TEST_ASSERT_EQUAL_UINT16(40u, overflow.start);
   TEST_ASSERT_EQUAL_UINT16(33u, overflow.count);
   TEST_ASSERT_EQUAL_UINT8(2u, overflow.units);
@@ -1052,10 +1059,10 @@ void test_overflow_tokens_and_newest_retention_are_stable() {
   ordered.transact(targetedWrite(kUnitId, 6, {0, 71, 0x12, 0x34}));
   ordered.transact(targetedWrite(kUnitId, 15, {0, 72, 0, 2, 1, 0x03}));
 
-  BridgeIngressEntry coil;
-  BridgeIngressEntry holding;
-  TEST_ASSERT_TRUE(ordered.slave.bridgePeekOverflowCoils(coil));
-  TEST_ASSERT_TRUE(ordered.slave.bridgePeekOverflowHolding(holding));
+  ModbusRTUSlave::BridgeIngressEntry coil;
+  ModbusRTUSlave::BridgeIngressEntry holding;
+  TEST_ASSERT_TRUE(ordered.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::Coils, coil));
+  TEST_ASSERT_TRUE(ordered.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, holding));
   TEST_ASSERT_EQUAL_UINT16(2u, coil.sourceToken);
   TEST_ASSERT_EQUAL_UINT16(3u, holding.sourceToken);
   TEST_ASSERT_EQUAL_UINT16(70u, coil.start);
@@ -1068,8 +1075,8 @@ void test_overflow_tokens_and_newest_retention_are_stable() {
   TEST_ASSERT_EQUAL_UINT8(0u, coil.snapshotCount);
   TEST_ASSERT_EQUAL_UINT8(0u, holding.snapshotCount);
   TEST_ASSERT_TRUE(
-      ordered.slave.bridgeCommitOverflowCoils(coil.sourceToken));
-  TEST_ASSERT_TRUE(ordered.slave.bridgePeekOverflowCoils(coil));
+      ordered.slave.bridgeCommitDrop(ModbusRTUSlave::BridgeIngressTable::Coils, coil.sourceToken));
+  TEST_ASSERT_TRUE(ordered.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::Coils, coil));
   TEST_ASSERT_EQUAL_UINT16(4u, coil.sourceToken);
   TEST_ASSERT_EQUAL_UINT16(72u, coil.start);
 
@@ -1089,8 +1096,8 @@ void test_overflow_tokens_and_newest_retention_are_stable() {
   constexpr uint16_t kRetained = kBridgeOverflowQueueSize - 1u;
   constexpr uint16_t kFirstRetained = kRejected - kRetained;
   for (uint16_t i = kFirstRetained; i < kRejected; ++i) {
-    BridgeIngressEntry retained;
-    TEST_ASSERT_TRUE(saturated.slave.bridgePeekOverflowHolding(retained));
+    ModbusRTUSlave::BridgeIngressEntry retained;
+    TEST_ASSERT_TRUE(saturated.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, retained));
     TEST_ASSERT_EQUAL_UINT16(i, retained.start);
     TEST_ASSERT_EQUAL_UINT16(1u, retained.count);
     TEST_ASSERT_EQUAL_UINT8(1u, retained.units);
@@ -1102,11 +1109,12 @@ void test_overflow_tokens_and_newest_retention_are_stable() {
             ModbusRTUSlave::kBridgeDropReasonAdmissionRejected,
         retained.attributes);
     TEST_ASSERT_EQUAL_UINT8(0u, retained.snapshotCount);
-    TEST_ASSERT_TRUE(saturated.slave.bridgeCommitOverflowHolding(
+    TEST_ASSERT_TRUE(saturated.slave.bridgeCommitDrop(
+        ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
         retained.sourceToken));
   }
-  BridgeIngressEntry empty;
-  TEST_ASSERT_FALSE(saturated.slave.bridgePeekOverflowHolding(empty));
+  ModbusRTUSlave::BridgeIngressEntry empty;
+  TEST_ASSERT_FALSE(saturated.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, empty));
 }
 
 void test_source_and_overflow_tokens_skip_zero_at_uint16_rollover() {
@@ -1118,29 +1126,31 @@ void test_source_and_overflow_tokens_skip_zero_at_uint16_rollover() {
   source.serial.captureWrites = false;
   const auto sourceChurn =
       targetedWrite(kUnitId, 6, {0, 90, 0x12, 0x34});
-  BridgeIngressEntry pending;
-  bool isCoil = false;
+  ModbusRTUSlave::BridgeIngressEntry pending;
+  auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
   constexpr uint32_t kAdvanceToBeforeWrap = 65533U;
   for (uint32_t index = 0U; index < kAdvanceToBeforeWrap; ++index) {
     source.transact(sourceChurn);
-    TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, isCoil));
-    TEST_ASSERT_FALSE(isCoil);
+    TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, table));
+    TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+                      table);
     TEST_ASSERT_NOT_EQUAL(0U, pending.sourceToken);
     TEST_ASSERT_TRUE(
-        source.slave.bridgeCommitNext(isCoil, pending.sourceToken));
+        source.slave.bridgeCommit(table, pending.sourceToken));
   }
 
   source.transact(targetedWrite(kUnitId, 5, {0, 91, 0xFF, 0x00}));
   source.transact(targetedWrite(kUnitId, 6, {0, 92, 0xBE, 0xEF}));
-  TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, isCoil));
-  TEST_ASSERT_TRUE(isCoil);
+  TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::Coils, table);
   TEST_ASSERT_EQUAL_UINT16(0xFFFFU, pending.sourceToken);
-  TEST_ASSERT_TRUE(source.slave.bridgeCommitNext(isCoil, pending.sourceToken));
-  TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, isCoil));
-  TEST_ASSERT_FALSE(isCoil);
+  TEST_ASSERT_TRUE(source.slave.bridgeCommit(table, pending.sourceToken));
+  TEST_ASSERT_TRUE(source.slave.bridgePeekNext(pending, table));
+  TEST_ASSERT_EQUAL(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters,
+                    table);
   TEST_ASSERT_EQUAL_UINT16(1U, pending.sourceToken);
-  TEST_ASSERT_TRUE(source.slave.bridgeCommitNext(isCoil, pending.sourceToken));
-  TEST_ASSERT_FALSE(source.slave.bridgePeekNext(pending, isCoil));
+  TEST_ASSERT_TRUE(source.slave.bridgeCommit(table, pending.sourceToken));
+  TEST_ASSERT_FALSE(source.slave.bridgePeekNext(pending, table));
 
   Fixture dropped;
   dropped.admit = false;
@@ -1150,22 +1160,22 @@ void test_source_and_overflow_tokens_skip_zero_at_uint16_rollover() {
       targetedWrite(kUnitId, 6, {0, 93, 0x45, 0x67});
   for (uint32_t index = 0U; index < kAdvanceToBeforeWrap; ++index) {
     dropped.transact(dropChurn);
-    TEST_ASSERT_TRUE(dropped.slave.bridgePeekOverflowHolding(pending));
+    TEST_ASSERT_TRUE(dropped.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
     TEST_ASSERT_NOT_EQUAL(0U, pending.sourceToken);
     TEST_ASSERT_TRUE(
-        dropped.slave.bridgeCommitOverflowHolding(pending.sourceToken));
+        dropped.slave.bridgeCommitDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending.sourceToken));
   }
 
   dropped.transact(targetedWrite(kUnitId, 5, {0, 94, 0xFF, 0x00}));
   dropped.transact(targetedWrite(kUnitId, 6, {0, 95, 0x89, 0xAB}));
-  TEST_ASSERT_TRUE(dropped.slave.bridgePeekOverflowCoils(pending));
+  TEST_ASSERT_TRUE(dropped.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::Coils, pending));
   TEST_ASSERT_EQUAL_UINT16(0xFFFFU, pending.sourceToken);
   TEST_ASSERT_TRUE(
-      dropped.slave.bridgeCommitOverflowCoils(pending.sourceToken));
-  TEST_ASSERT_TRUE(dropped.slave.bridgePeekOverflowHolding(pending));
+      dropped.slave.bridgeCommitDrop(ModbusRTUSlave::BridgeIngressTable::Coils, pending.sourceToken));
+  TEST_ASSERT_TRUE(dropped.slave.bridgePeekDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending));
   TEST_ASSERT_EQUAL_UINT16(1U, pending.sourceToken);
   TEST_ASSERT_TRUE(
-      dropped.slave.bridgeCommitOverflowHolding(pending.sourceToken));
+      dropped.slave.bridgeCommitDrop(ModbusRTUSlave::BridgeIngressTable::HoldingRegisters, pending.sourceToken));
 }
 
 void test_poll_and_tx_pump_operation_counts_are_exact() {
@@ -1405,13 +1415,14 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
     const auto started = std::chrono::steady_clock::now();
     for (uint32_t i = 0; i < kForwardedRequests; ++i) {
       forwarded.transact(forwardedRequest);
-      BridgeIngressEntry pending;
-      bool isCoil = true;
-      if (!forwarded.slave.bridgePeekNext(pending, isCoil) || isCoil) {
+      ModbusRTUSlave::BridgeIngressEntry pending;
+      auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+      if (!forwarded.slave.bridgePeekNext(pending, table) ||
+          table == ModbusRTUSlave::BridgeIngressTable::Coils) {
         ++forwardedDrainFailures;
       } else {
         forwardedTokenChecksum += pending.sourceToken;
-        if (!forwarded.slave.bridgeCommitNext(false, pending.sourceToken)) {
+        if (!forwarded.slave.bridgeCommit(table, pending.sourceToken)) {
           ++forwardedDrainFailures;
         }
       }
@@ -1435,10 +1446,10 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
                            forwarded.serial.writeCalls);
   TEST_ASSERT_EQUAL_UINT64(kSamples * kForwardedRequests,
                            forwarded.serial.flushCalls);
-  BridgeIngressEntry noPending;
-  bool noPendingIsCoil = false;
+  ModbusRTUSlave::BridgeIngressEntry noPending;
+  auto noPendingTable = ModbusRTUSlave::BridgeIngressTable::Coils;
   TEST_ASSERT_FALSE(
-      forwarded.slave.bridgePeekNext(noPending, noPendingIsCoil));
+      forwarded.slave.bridgePeekNext(noPending, noPendingTable));
   TEST_ASSERT_TRUE(forwardedSamples[kSamples / 2u] <
                    std::chrono::duration_cast<std::chrono::nanoseconds>(
                        std::chrono::seconds(5)).count());
@@ -1461,9 +1472,9 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
       for (uint32_t i = 0; i < operations; ++i) {
         lane.transact(laneRequest);
         for (uint8_t chunk = 0; chunk < expectedChunks; ++chunk) {
-          BridgeIngressEntry pending;
-          bool isCoil = true;
-          if (!lane.slave.bridgePeekNext(pending, isCoil)) {
+          ModbusRTUSlave::BridgeIngressEntry pending;
+          auto table = ModbusRTUSlave::BridgeIngressTable::Coils;
+          if (!lane.slave.bridgePeekNext(pending, table)) {
             ++failures;
             continue;
           }
@@ -1471,13 +1482,14 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
           const uint16_t remaining =
               static_cast<uint16_t>(expectedCount - chunkOffset);
           const uint16_t chunkCount = remaining > 32u ? 32u : remaining;
-          if (isCoil || pending.start != expectedStart + chunkOffset ||
+          if (table == ModbusRTUSlave::BridgeIngressTable::Coils ||
+              pending.start != expectedStart + chunkOffset ||
               pending.count != chunkCount ||
               pending.snapshotCount != chunkCount || pending.units != 1u) {
             ++failures;
           }
           tokenChecksum += pending.sourceToken;
-          if (!lane.slave.bridgeCommitNext(false, pending.sourceToken)) {
+          if (!lane.slave.bridgeCommit(table, pending.sourceToken)) {
             ++failures;
           }
         }
@@ -1576,7 +1588,7 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
       static_cast<long long>(forwardedNsPerOp),
       static_cast<long long>(forwardedMaxNsPerOp),
       static_cast<long long>(forwardedMultichunkNsPerOp),
-      sizeof(ModbusRTUSlave), sizeof(BridgeIngressEntry));
+      sizeof(ModbusRTUSlave), sizeof(ModbusRTUSlave::BridgeIngressEntry));
   std::fflush(stdout);
   if (std::getenv("MBUS_RTU_SLAVE_STRICT_PERFORMANCE") != nullptr) {
     // These conservative absolute ceilings catch material regressions while
@@ -1596,11 +1608,11 @@ void test_idle_poll_and_request_throughput_stay_within_characterized_budgets() {
 }
 
 void test_bridge_mode_native_object_footprint_stays_bounded() {
-  static_assert(std::is_standard_layout<BridgeIngressEntry>::value,
-                "BridgeIngressEntry must remain a zero-copy journal record");
-  static_assert(std::is_trivially_copyable<BridgeIngressEntry>::value,
-                "BridgeIngressEntry must remain safe for journal snapshot memcpy");
-  TEST_ASSERT_EQUAL_UINT32(76u, sizeof(BridgeIngressEntry));
+  static_assert(std::is_standard_layout<ModbusRTUSlave::BridgeIngressEntry>::value,
+                "ModbusRTUSlave::BridgeIngressEntry must remain a zero-copy journal record");
+  static_assert(std::is_trivially_copyable<ModbusRTUSlave::BridgeIngressEntry>::value,
+                "ModbusRTUSlave::BridgeIngressEntry must remain safe for journal snapshot memcpy");
+  TEST_ASSERT_EQUAL_UINT32(76u, sizeof(ModbusRTUSlave::BridgeIngressEntry));
   TEST_ASSERT_EQUAL_UINT32(16144u, sizeof(ModbusRTUSlave));
 }
 
