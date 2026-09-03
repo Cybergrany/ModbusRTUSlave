@@ -33,6 +33,9 @@ Use this library to:
 - **Robust timing edges.** RTU idle and transmit deadlines remain safe across
   the wrapping Arduino microsecond clock, with target-specific drain handling
   where required.
+- **Buffered-frame recovery.** A delayed cooperative poll can peel CRC-valid
+  standard requests, peer responses, exceptions, and targeted broadcasts one
+  at a time without consuming the following frame.
 - **Optional integration hooks.** Compile-time mutexes, work-state accessors,
   diagnostics, and a durable ingress journal are available while
   the default build stays small. See
@@ -112,14 +115,20 @@ The journal under `src/detail/` is an implementation detail. Integrations
 should use the public `ModbusRTUSlave` methods rather than include that header
 directly.
 
-## Known framing limitation
+## Buffered framing
 
 Arduino `Stream` does not retain the physical arrival time of bytes that are
-already queued. If two complete RTU frames are buffered before one `poll()`,
-their real inter-frame gap may be lost and the current parser can reject the
-combined bytes as one CRC-invalid frame. Applications should service `poll()`
-frequently. Any parser change needs both buffered-frame tests and target UART
-validation.
+already queued. When a delayed `poll()` sees multiple frames, the parser uses
+standard function lengths plus CRC to peel one complete prefix per call while
+retaining the tail. Applications with deterministic custom function shapes
+can register one callback with `setAdditionalFrameCandidateFn()`; that callback
+may recognize multiple shapes.
+
+T3.5 remains the normal frame boundary. Leading noise and functions without a
+deterministic registered length are discarded through the next observed idle
+boundary rather than searched byte-by-byte. Target UART validation is still
+required because `Stream` cannot expose historical arrival gaps or hardware
+overruns.
 
 ## Examples and reference
 

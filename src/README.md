@@ -57,6 +57,14 @@ a target unit. Only that unit mutates, and no unit replies. A unicast FC
 
 Frames complete after at least the calculated T3.5 idle interval. The
 deadline calculations are safe across the wrapping Arduino microsecond clock.
+If more traffic is already queued, CRC-valid standard requests, peer responses,
+exceptions, and FC `0x45` requests are peeled one at a time so a delayed
+cooperative poll does not merge and discard multiple frames.
+
+Call `setAdditionalFrameCandidateFn()` once during setup to support deterministic
+custom function shapes in the same buffered recovery path. A single callback
+may recognize multiple function/length combinations. It is not consulted for
+ordinary T3.5-framed traffic.
 
 ## Optional compile-time features
 
@@ -184,13 +192,21 @@ stores reservations, immutable value chunks, and overflow records in fixed
 compile-time capacity. Consumers should access it through
 `ModbusRTUSlave` so journal storage remains an internal detail.
 
-## Known parser limitation
+## Buffered parser recovery
 
-If two complete RTU frames are already buffered before one `poll()`, Arduino
-`Stream` does not preserve the physical T3.5 gap between them. `_readRequest()`
-can drain both into one candidate and reject the combined bytes on CRC.
+If multiple complete RTU frames are buffered before one `poll()`, Arduino
+`Stream` does not preserve their physical T3.5 gaps. The parser therefore uses
+deterministic function lengths plus CRC to peel one prefix per call and leaves
+the following bytes queued. Foreign requests, peer responses, and exceptions
+are ignored after framing; broadcasts remain actionable without a reply.
 
-The source retains a detailed TODO beside `_readRequest()`. A fix must preserve
-the trailing frame, characterize two buffered valid ADUs including targeted
-broadcast followed by unicast, and be validated with physical UART timing.
-Ignoring the CRC statistic alone would not fix the parser.
+A buffered local unicast is dropped before mutation or transmission because a
+conforming RTU master does not pipeline reply-bearing requests and RTU provides
+no transaction ID for safely matching a late response. Its trailing frame is
+preserved. A final local request still waits for the existing T3.5 boundary and
+then follows the normal dispatcher and response path.
+
+Unknown-length traffic and noise are not searched for an embedded CRC. An
+overflow enters a bounded discard state until an idle boundary is observed,
+after which clean traffic can be parsed normally. Physical UART arrival timing
+and hardware overruns remain outside what the `Stream` API can recover.

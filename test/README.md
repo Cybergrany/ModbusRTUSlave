@@ -35,7 +35,7 @@ PLATFORMIO_CORE_DIR=/absolute/path/to/a/writable/platformio-core \
 pio test -e native_modbus_tests
 ```
 
-The 31 cases cover:
+The 40 cases cover:
 
 - exact FC 1/2/3/4 responses and FC 5/6/15/16 mutations and acknowledgements;
 - CRC, foreign-unit, exception, malformed targeted-broadcast, and receive
@@ -46,6 +46,9 @@ The 31 cases cover:
 - local callbacks, rejected writes, queue saturation, chunking, and tokens;
 - T3.5 boundaries, partial-frame deadlines, clock rollover, cooperative
   transmit drain, UART flush, and DE transitions; and
+- multi-frame backlog extraction across foreign requests, peer responses,
+  exceptions, standard and targeted broadcasts, stale local retries, custom
+  shapes, and bounded overflow recovery; and
 - clock, serial, mutex, flush, diagnostic, object-size, and operation counts.
 
 ## Ingress journal
@@ -89,6 +92,6 @@ latency, real drain duration, DE electrical edges, cross-core mutex behavior,
 RS485 contention, or application scheduling. Those require target and bus
 validation.
 
-The queued-two-frames parser limitation is documented, not characterized as
-passing. Any repair needs a dedicated buffered-frame fixture and physical
-timing validation.
+Buffered multi-frame recovery is characterized in the native suite. Physical
+timing validation remains necessary for UART FIFO/ISR behavior and real bus
+idle boundaries.

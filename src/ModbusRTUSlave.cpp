@@ -221,8 +221,169 @@ void ModbusRTUSlave::copyAndResetBridgeUpstreamTxDiag(BridgeUpstreamTxDiagSnapsh
 }
 #endif
 
+namespace {
+
+bool isFixedDiagnosticSubfunction(uint16_t subfunction){
+  return (subfunction >= 1U && subfunction <= 4U) ||
+         (subfunction >= 10U && subfunction <= 18U) ||
+         subfunction == 20U;
+}
+
+bool isReadDeviceIdResponseCandidate(const uint8_t* rtu,
+                                     uint16_t receivedLen){
+  if(receivedLen < 10U || rtu[2] != 14U){
+    return false;
+  }
+
+  uint16_t offset = 8U;
+  const uint8_t objectCount = rtu[7];
+  for(uint16_t object = 0U; object < objectCount; ++object){
+    if(offset + 2U > receivedLen){
+      return false;
+    }
+    const uint8_t objectLength = rtu[offset + 1U];
+    offset = static_cast<uint16_t>(offset + 2U);
+    if(offset + objectLength > receivedLen){
+      return false;
+    }
+    offset = static_cast<uint16_t>(offset + objectLength);
+  }
+  return offset + 2U == receivedLen;
+}
+
+uint16_t boundedCandidateLength(uint32_t length){
+  return length <= 256U ? static_cast<uint16_t>(length) : 0U;
+}
+
+uint16_t expectedStandardRequestLength(const uint8_t* rtu,
+                                       uint16_t receivedLen){
+  if(receivedLen < 2U){
+    return 0U;
+  }
+
+  switch(rtu[1]){
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+      return 8U;
+    case 7:
+    case 11:
+    case 12:
+    case 17:
+      return 4U;
+    case 8: {
+      if(receivedLen < 4U){
+        return 0U;
+      }
+      const uint16_t subfunction =
+          (static_cast<uint16_t>(rtu[2]) << 8) | rtu[3];
+      // Return Query Data (subfunction 0) and reserved diagnostics have no
+      // deterministic standard length, so T3.5 or the custom hook frames them.
+      return isFixedDiagnosticSubfunction(subfunction) ? 8U : 0U;
+    }
+    case 15:
+    case 16:
+      return receivedLen >= 7U
+                 ? boundedCandidateLength(9U + rtu[6])
+                 : 0U;
+    case 20:
+    case 21:
+      return receivedLen >= 3U
+                 ? boundedCandidateLength(5U + rtu[2])
+                 : 0U;
+    case 22:
+      return 10U;
+    case 23:
+      return receivedLen >= 11U
+                 ? boundedCandidateLength(13U + rtu[10])
+                 : 0U;
+    case 24:
+      return 6U;
+    case 43:
+      return receivedLen >= 3U && rtu[2] == 14U ? 7U : 0U;
+    case 69:
+      if(receivedLen < 4U){
+        return 0U;
+      }
+      switch(rtu[3]){
+        case 5:
+        case 6:
+          return 10U;
+        case 15:
+        case 16:
+          return receivedLen >= 9U
+                     ? boundedCandidateLength(11U + rtu[8])
+                     : 0U;
+        default:
+          return 0U;
+      }
+    default:
+      return 0U;
+  }
+}
+
+uint16_t expectedStandardResponseLength(const uint8_t* rtu,
+                                        uint16_t receivedLen){
+  if(receivedLen < 2U){
+    return 0U;
+  }
+  if((rtu[1] & 0x80U) != 0U){
+    return 5U;
+  }
+
+  switch(rtu[1]){
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 12:
+    case 17:
+    case 20:
+    case 21:
+    case 23:
+      return receivedLen >= 3U
+                 ? boundedCandidateLength(5U + rtu[2])
+                 : 0U;
+    case 5:
+    case 6:
+    case 15:
+    case 16:
+      return 8U;
+    case 7:
+      return 5U;
+    case 8: {
+      if(receivedLen < 4U){
+        return 0U;
+      }
+      const uint16_t subfunction =
+          (static_cast<uint16_t>(rtu[2]) << 8) | rtu[3];
+      return isFixedDiagnosticSubfunction(subfunction) ? 8U : 0U;
+    }
+    case 11:
+      return 8U;
+    case 22:
+      return 10U;
+    case 24:
+      return receivedLen >= 4U
+                 ? boundedCandidateLength(
+                       6U + (static_cast<uint16_t>(rtu[2]) << 8) + rtu[3])
+                 : 0U;
+    case 43:
+      return isReadDeviceIdResponseCandidate(rtu, receivedLen)
+                 ? receivedLen
+                 : 0U;
+    default:
+      return 0U;
+  }
+}
+
+} // namespace
+
 // returns false if malformed length for inner FC
-static inline bool fc69_len_ok(const uint8_t *b, uint8_t len){
+static inline bool fc69_len_ok(const uint8_t *b, uint16_t len){
   /// b[0]=0x00 addr, b[1]=0x45, b[2]=TID, b[3]=IFC, b[4..]=inner PDU, CRC is last 2 bytes
   if (len < 8) return false;                 // smallest possible: FC05/06
   const uint8_t ifc = b[3];
@@ -338,6 +499,11 @@ void ModbusRTUSlave::configureInputRegisters(uint16_t inputRegisters[], uint16_t
   _numInputRegisters = numInputRegisters;
 }
 
+void ModbusRTUSlave::setAdditionalFrameCandidateFn(
+    FrameCandidateFn frameCandidate){
+  _additionalFrameCandidate = frameCandidate;
+}
+
 #ifdef ESP32
 void ModbusRTUSlave::begin(uint8_t id, unsigned long baud, uint32_t config, int8_t rxPin, int8_t txPin, bool invert) {
   if (id >= 1 && id <= 247) _id = id;
@@ -410,6 +576,15 @@ void ModbusRTUSlave::poll() {
 #endif
   // if (!_serial->available()) return;
   if (!_readRequest()) return;
+
+  // A conforming RTU master does not pipeline requests that require replies.
+  // If a local unicast was recoverable only because later traffic was already
+  // queued, its transaction may have timed out and RTU has no transaction ID
+  // with which to match a late response. Drop this earlier request before any
+  // register, bridge-journal, callback, or TX side effect; the trailing frame
+  // remains queued for the next poll. Buffered broadcasts remain actionable
+  // because they deliberately require no reply.
+  if (_rxBufferedCandidate && _buf[0] != 0U && _buf[0] == _id) return;
 
   const bool br = (_buf[0] == 0);   // broadcast on RTU/ASCII
   const uint8_t fc = _buf[1];
@@ -1034,57 +1209,38 @@ void ModbusRTUSlave::_processWriteMultipleHoldingRegisters() {
   }
 }
 
-bool ModbusRTUSlave::_readRequest() {
-  // TODO(rx-framing): Stream exposes queued bytes, not their physical arrival times.
-  // If poll() is delayed until two legal RTU frames are buffered, their real T3.5
-  // gap is lost here; this drain concatenates them and the single CRC check below
-  // rejects both. The edge is local to each slave's service cadence, so another
-  // node may parse the same wire traffic correctly. Characterize it by queuing two
-  // CRC-valid ADUs before one service pass (including FC69 followed by unicast) and
-  // asserting that each is extracted without a spurious CRC failure. Mitigate by
-  // peeling one function-length-derived ADU at a time while retaining trailing
-  // bytes, or by carrying UART idle/per-byte timing into the parser; do not merely
-  // suppress the CRC statistic.
-  // ingest available bytes without waiting
-  while (_serial->available() && _rxNumBytes < MODBUS_RTU_SLAVE_BUF_SIZE) {
-    uint8_t b = _serial->read();
-    if (!_rxInFrame) { _rxInFrame = true; _rxNumBytes = 0; }
-    _buf[_rxNumBytes++] = b;
-    _rxLastByteUs = micros();
-#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-    dbg_.last_byte_us = _rxLastByteUs;
-#endif
+bool ModbusRTUSlave::_candidateCrcGood(uint16_t receivedLen) {
+  if(receivedLen < 4U || receivedLen > 256U){
+    return false;
   }
-#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-  if (_serial->available() && _rxNumBytes >= MODBUS_RTU_SLAVE_BUF_SIZE) {
-    ++dbg_.rx_overflows;
-  }
-#endif
+  return _crc(static_cast<uint8_t>(receivedLen - 2U)) ==
+         _bytesToWord(_buf[receivedLen - 1U], _buf[receivedLen - 2U]);
+}
 
-  if (!_rxInFrame) return false;
-
-  // frame ends on ≥ t3.5 idle
-  const uint32_t now = micros();
-  if ((uint32_t)(now - _rxLastByteUs) < _frameTimeout) return false;
-
-  // finalize
+bool ModbusRTUSlave::_finishRequest(bool bufferedCandidate) {
+  const uint16_t frameLen = _rxNumBytes;
   _rxInFrame = false;
-  const bool addressed = (_buf[0] == _id || _buf[0] == 0);
-  if (_rxNumBytes >= 4 && addressed) {
-    const bool ok = (_crc(_rxNumBytes - 2) ==
-                     _bytesToWord(_buf[_rxNumBytes - 1], _buf[_rxNumBytes - 2]));
-    if (ok) _rxLen = _rxNumBytes; 
+  _rxBufferedCandidate = bufferedCandidate;
+
+  const bool addressed = (_buf[0] == _id || _buf[0] == 0U);
+  if(frameLen >= 4U && addressed){
+    const bool ok = _candidateCrcGood(frameLen);
+    if(ok){
+      _rxLen = frameLen;
+    }
 #ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
     if(!ok){
       noteEvent(kEventCrcMismatch);
     }
 #endif
 #ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-    if (_rxNumBytes > dbg_.max_rx_len) dbg_.max_rx_len = _rxNumBytes;
+    if(frameLen > dbg_.max_rx_len){
+      dbg_.max_rx_len = frameLen;
+    }
 #endif
-    _rxNumBytes = 0;
+    _rxNumBytes = 0U;
 #ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-    if (ok) {
+    if(ok){
       dbg_.last_frame_us = micros();
       ++dbg_.frames_ok;
       dbg_.last_req_us = dbg_.last_frame_us;
@@ -1092,7 +1248,9 @@ bool ModbusRTUSlave::_readRequest() {
       dbg_.last_req_fc = _buf[1];
       dbg_.last_req_len = _rxLen;
     } else {
-      dbg_.last_bad_len = _rxLen ? _rxLen : _rxNumBytes;
+      // Capture the completed candidate length before resetting the parser;
+      // the old ordering reported zero or a stale preceding request length.
+      dbg_.last_bad_len = frameLen;
       dbg_.last_bad_id = _buf[0];
       dbg_.last_bad_fc = _buf[1];
       dbg_.last_bad_start = (uint16_t(_buf[2]) << 8) | _buf[3];
@@ -1102,23 +1260,192 @@ bool ModbusRTUSlave::_readRequest() {
     return ok;
   }
 #ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-  if (_rxNumBytes >= 4 && !addressed) {
+  if(frameLen >= 4U && !addressed){
     ++dbg_.not_addressed;
     dbg_.last_not_addr_id = _buf[0];
   }
-#endif
-#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
-  if (_rxNumBytes > 0 && _rxNumBytes < 4 && addressed) {
+  if(frameLen > 0U && frameLen < 4U && addressed){
     ++dbg_.short_frames;
   }
 #endif
 #ifdef MBUS_RTU_SLAVE_EVENT_CALLBACKS
-  if(_rxNumBytes != 0U && addressed){
+  if(frameLen != 0U && addressed){
     noteEvent(kEventMalformedFrame);
   }
 #endif
-  _rxNumBytes = 0;
+  _rxNumBytes = 0U;
   return false;
+}
+
+void ModbusRTUSlave::_beginRxDiscard() {
+  _rxDiscardUntilIdle = true;
+  // Reuse the existing RX-active signal so cooperative schedulers continue
+  // servicing the bounded discard state until the bus becomes idle.
+  _rxInFrame = true;
+  _rxBufferedCandidate = false;
+  _rxNumBytes = 0U;
+}
+
+void ModbusRTUSlave::_drainRxDiscard() {
+  uint16_t drained = 0U;
+  // Never let a continuously noisy or broken bus monopolize poll(). Each pass
+  // does no more receive work than the normal fixed-size parser buffer.
+  while(drained < MODBUS_RTU_SLAVE_BUF_SIZE && _serial->available()){
+    if(_serial->read() < 0){
+      break;
+    }
+    ++drained;
+    _rxLastByteUs = micros();
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
+    dbg_.last_byte_us = _rxLastByteUs;
+#endif
+  }
+  if(_serial->available()){
+    return;
+  }
+  if(static_cast<uint32_t>(micros() - _rxLastByteUs) >= _frameTimeout){
+    _rxDiscardUntilIdle = false;
+    _rxInFrame = false;
+  }
+}
+
+bool ModbusRTUSlave::_readRequest() {
+  int queued = _serial->available();
+  if(queued <= 0 && !_rxInFrame){
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
+    // Preserve the existing diagnostics-path second availability sample.
+    _serial->available();
+#endif
+    return false;
+  }
+  if(_rxDiscardUntilIdle){
+    _drainRxDiscard();
+    return false;
+  }
+
+  // Only foreign unit IDs can be peer responses. Keeping local and broadcast
+  // traffic request-shaped avoids splitting a variable FC15/FC16 request at
+  // an accidental CRC-valid eight-byte response prefix.
+  bool allowResponseCandidate =
+      _rxNumBytes > 0U && _buf[0] != 0U && _buf[0] != _id;
+  uint16_t expectedRequestLen = 0U;
+  uint16_t expectedResponseLen = 0U;
+  if(_rxNumBytes >= 2U){
+    expectedRequestLen =
+        expectedStandardRequestLength(_buf, _rxNumBytes);
+  }
+  if(_rxNumBytes >= 2U && allowResponseCandidate){
+    expectedResponseLen =
+        expectedStandardResponseLength(_buf, _rxNumBytes);
+  }
+
+  // If a complete prefix was accumulated by an earlier poll and more bytes
+  // are now queued, their historical arrival gap is no longer observable.
+  // CRC plus a deterministic function shape is the narrow fallback boundary.
+  if(_rxInFrame && queued > 0){
+    bool candidate =
+        (expectedRequestLen != 0U && _rxNumBytes == expectedRequestLen) ||
+        (expectedResponseLen != 0U && _rxNumBytes == expectedResponseLen);
+    if(!candidate && _rxNumBytes >= 4U && _additionalFrameCandidate){
+      candidate = _additionalFrameCandidate(_buf, _rxNumBytes);
+    }
+    if(candidate && _candidateCrcGood(_rxNumBytes)){
+      return _finishRequest(true);
+    }
+  }
+
+  // Consume currently queued bytes without waiting. Once a standard length is
+  // known, bulk-drain directly to that boundary; the normal path therefore
+  // adds no candidate work to each payload byte. Unknown/custom shapes advance
+  // one byte at a time so their next possible boundary can be reconsidered.
+  while(queued > 0 && _rxNumBytes < MODBUS_RTU_SLAVE_BUF_SIZE){
+    uint16_t readLimit;
+    if(_additionalFrameCandidate || expectedRequestLen == 0U ||
+       (allowResponseCandidate && expectedResponseLen == 0U)){
+      readLimit = static_cast<uint16_t>(_rxNumBytes + 1U);
+    } else {
+      readLimit = MODBUS_RTU_SLAVE_BUF_SIZE;
+      if(expectedRequestLen > _rxNumBytes){
+        readLimit = expectedRequestLen;
+      }
+      if(allowResponseCandidate && expectedResponseLen > _rxNumBytes &&
+         expectedResponseLen < readLimit){
+        readLimit = expectedResponseLen;
+      }
+    }
+
+    while(queued > 0 && _rxNumBytes < readLimit &&
+          _rxNumBytes < MODBUS_RTU_SLAVE_BUF_SIZE){
+      const int value = _serial->read();
+      if(value < 0){
+        queued = _serial->available();
+        break;
+      }
+      if(!_rxInFrame){
+        _rxInFrame = true;
+        _rxNumBytes = 0U;
+      }
+      _buf[_rxNumBytes++] = static_cast<uint8_t>(value);
+      _rxLastByteUs = micros();
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
+      dbg_.last_byte_us = _rxLastByteUs;
+#endif
+      queued = _serial->available();
+    }
+
+    allowResponseCandidate =
+        _rxNumBytes > 0U && _buf[0] != 0U && _buf[0] != _id;
+    if(expectedRequestLen == 0U && _rxNumBytes >= 2U){
+      expectedRequestLen =
+          expectedStandardRequestLength(_buf, _rxNumBytes);
+    }
+    if(expectedResponseLen == 0U && _rxNumBytes >= 2U &&
+       allowResponseCandidate){
+      expectedResponseLen =
+          expectedStandardResponseLength(_buf, _rxNumBytes);
+    }
+    if(queued > 0){
+      bool candidate =
+          (expectedRequestLen != 0U && _rxNumBytes == expectedRequestLen) ||
+          (expectedResponseLen != 0U && _rxNumBytes == expectedResponseLen);
+      if(!candidate && _rxNumBytes >= 4U && _additionalFrameCandidate){
+        candidate = _additionalFrameCandidate(_buf, _rxNumBytes);
+      }
+      if(candidate && _candidateCrcGood(_rxNumBytes)){
+        return _finishRequest(true);
+      }
+    }
+  }
+
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
+  // Preserve the characterized diagnostics-path availability call count.
+  const bool overflowQueued =
+      _serial->available() && _rxNumBytes >= MODBUS_RTU_SLAVE_BUF_SIZE;
+#else
+  const bool overflowQueued =
+      queued > 0 && _rxNumBytes >= MODBUS_RTU_SLAVE_BUF_SIZE;
+#endif
+  if(overflowQueued){
+#ifdef MBUS_RTU_SLAVE_DIAGNOSTICS
+    ++dbg_.rx_overflows;
+#endif
+    _beginRxDiscard();
+    return false;
+  }
+
+  if(!_rxInFrame){
+    return false;
+  }
+
+  // A software timestamp cannot prove an idle interval while unread bytes are
+  // queued: a busy cooperative caller may simply not have consumed a valid
+  // frame continuation yet. Only an empty queue makes the existing T3.5
+  // completion rule authoritative.
+  const uint32_t now = micros();
+  if(static_cast<uint32_t>(now - _rxLastByteUs) < _frameTimeout){
+    return false;
+  }
+  return _finishRequest(false);
 }
 
 void ModbusRTUSlave::_writeResponse(uint8_t len){
@@ -1223,6 +1550,10 @@ void ModbusRTUSlave::_exceptionResponse(uint8_t code) {
 
 void ModbusRTUSlave::_clearRxBuffer() {
   while (_serial->available()) _serial->read();
+  _rxNumBytes = 0U;
+  _rxInFrame = false;
+  _rxBufferedCandidate = false;
+  _rxDiscardUntilIdle = false;
 }
 
 

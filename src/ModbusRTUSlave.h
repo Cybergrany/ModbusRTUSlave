@@ -134,6 +134,13 @@ class ModbusRTUSlave {
     void configureDiscreteInputs(bool discreteInputs[], uint16_t numDiscreteInputs);
     void configureHoldingRegisters(uint16_t holdingRegisters[], uint16_t numHoldingRegisters);
     void configureInputRegisters(uint16_t inputRegisters[], uint16_t numInputRegisters);
+    // Registers one optional classifier for application-specific RTU frame
+    // shapes. Configure it once during setup; one callback may recognize any
+    // number of custom function/length combinations. It is consulted only
+    // when trailing bytes make a historical T3.5 boundary unobservable.
+    using FrameCandidateFn = bool (*)(const uint8_t* rtu,
+                                      uint16_t receivedLen);
+    void setAdditionalFrameCandidateFn(FrameCandidateFn frameCandidate);
     #ifdef ESP32
     void begin(uint8_t id, unsigned long baud, uint32_t config = SERIAL_8N1, int8_t rxPin = -1, int8_t txPin = -1, bool invert = false);
     #else
@@ -306,9 +313,12 @@ class ModbusRTUSlave {
     unsigned long _frameTimeout;
 
     // Per-instance RX frame tracking
+    FrameCandidateFn _additionalFrameCandidate = nullptr;
     uint16_t _rxNumBytes = 0;
     uint32_t _rxLastByteUs = 0;
     volatile bool _rxInFrame = false;
+    bool _rxBufferedCandidate = false;
+    bool _rxDiscardUntilIdle = false;
 
     #ifdef FLUSH_COMPENSATION_DELAY
     unsigned long _flushCompensationDelay;
@@ -324,6 +334,10 @@ class ModbusRTUSlave {
     void _processWriteMultipleHoldingRegisters();
 
     bool _readRequest();
+    bool _finishRequest(bool bufferedCandidate);
+    bool _candidateCrcGood(uint16_t receivedLen);
+    void _beginRxDiscard();
+    void _drainRxDiscard();
     void _writeResponse(uint8_t len);
     void _exceptionResponse(uint8_t code);
     void _clearRxBuffer();
@@ -334,7 +348,7 @@ class ModbusRTUSlave {
     uint16_t _bytesToWord(uint8_t high, uint8_t low);
 
     volatile bool _txBusy=false;
-    uint8_t _txLen=0; uint8_t _rxLen = 0;
+    uint8_t _txLen=0; uint16_t _rxLen = 0;
 
     // Per-instance TX tracking
     bool _txWasBusy = false;

@@ -101,6 +101,13 @@ std::vector<uint8_t> targetedWrite(uint8_t target, uint8_t innerFc,
   return frame(std::move(payload));
 }
 
+bool multipleCustomFrameCandidates(const uint8_t* rtu,
+                                   uint16_t receivedLen) {
+  if (receivedLen < 2u) return false;
+  return (rtu[1] == 65u && receivedLen == 5u) ||
+         (rtu[1] == 66u && receivedLen == 6u);
+}
+
 void assertBytes(const std::vector<uint8_t>& expected,
                  const std::vector<uint8_t>& actual) {
   TEST_ASSERT_EQUAL_UINT32(expected.size(), actual.size());
@@ -406,6 +413,264 @@ void test_partial_frame_restarts_t35_from_the_last_byte() {
       fixture.serial.writes[0].atUs);
 }
 
+void test_queued_continuation_is_not_split_by_a_delayed_poll() {
+  Fixture fixture;
+  fixture.holding[3] = 0xCAFEu;
+  const auto request = readRequest(kUnitId, 3, 3, 1);
+
+  fixture.serial.inject(std::vector<uint8_t>(request.begin(), request.begin() + 3));
+  fixture.slave.poll();
+  fixture.serial.inject(std::vector<uint8_t>(request.begin() + 3, request.end()));
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200 * 2u);
+
+  // The elapsed software-read time is not proof of an on-wire gap while a
+  // continuation is queued. Consume it and restart T3.5 from the latest byte.
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_TRUE(fixture.slave.workState().rxInFrame());
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+
+  assertSingleTx(fixture, frame({kUnitId, 3, 2, 0xCA, 0xFE}));
+}
+
+void test_buffered_foreign_request_response_and_exception_preserve_local_tail() {
+  Fixture fixture;
+  fixture.holding[1] = 0xBEEFu;
+  const auto peerRequest = readRequest(9, 3, 1, 1);
+  const auto peerResponse = frame({9, 3, 2, 0x12, 0x34});
+  const auto peerException = frame({9, 0x83, 2});
+  const auto localRequest = readRequest(kUnitId, 3, 1, 1);
+  std::vector<uint8_t> backlog;
+  backlog.insert(backlog.end(), peerRequest.begin(), peerRequest.end());
+  backlog.insert(backlog.end(), peerResponse.begin(), peerResponse.end());
+  backlog.insert(backlog.end(), peerException.begin(), peerException.end());
+  backlog.insert(backlog.end(), localRequest.begin(), localRequest.end());
+  fixture.serial.inject(backlog);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(peerResponse.size() + peerException.size() +
+                               localRequest.size(),
+                           fixture.serial.rx.size());
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(peerException.size() + localRequest.size(),
+                           fixture.serial.rx.size());
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(localRequest.size(), fixture.serial.rx.size());
+  fixture.slave.poll();
+  TEST_ASSERT_TRUE(fixture.serial.rx.empty());
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+  assertSingleTx(fixture, frame({kUnitId, 3, 2, 0xBE, 0xEF}));
+  TEST_ASSERT_EQUAL_UINT32(3u, fixture.slave.debugInfo().not_addressed);
+  TEST_ASSERT_EQUAL_UINT32(0u, fixture.slave.debugInfo().frames_bad);
+  TEST_ASSERT_TRUE(fixture.events.empty());
+}
+
+void test_all_deterministic_standard_candidate_lengths_preserve_a_local_tail() {
+  const std::vector<std::vector<uint8_t>> candidates{
+      readRequest(9, 1, 0, 1),
+      writeSingle(9, 5, 0, 0xFF00u),
+      frame({9, 7}),
+      frame({9, 8, 0, 1, 0, 0}),
+      frame({9, 11}),
+      frame({9, 12}),
+      writeMultipleCoils(9, 0, {true, false, true}),
+      writeMultipleHolding(9, 0, {0x1234u}),
+      frame({9, 17}),
+      frame({9, 20, 7, 6, 0, 1, 0, 0, 0, 1}),
+      frame({9, 21, 7, 6, 0, 1, 0, 0, 0, 1}),
+      frame({9, 22, 0, 1, 0xFF, 0, 0x0F, 0xF0}),
+      frame({9, 23, 0, 1, 0, 1, 0, 2, 0, 1, 2, 0x12, 0x34}),
+      frame({9, 24, 0, 1}),
+      frame({9, 43, 14, 1, 0}),
+      frame({9, 1, 1, 0x01}),
+      writeSingle(9, 6, 0, 0x1234u),
+      frame({9, 7, 0x55}),
+      frame({9, 11, 0, 1, 0, 2}),
+      frame({9, 12, 2, 0xAA, 0xBB}),
+      frame({9, 15, 0, 1, 0, 3}),
+      frame({9, 16, 0, 1, 0, 1}),
+      frame({9, 17, 2, 0xAA, 0xBB}),
+      frame({9, 20, 2, 0xAA, 0xBB}),
+      frame({9, 21, 2, 0xAA, 0xBB}),
+      frame({9, 23, 2, 0xAA, 0xBB}),
+      frame({9, 24, 0, 4, 0, 1, 0x12, 0x34}),
+      frame({9, 43, 14, 1, 1, 0, 0, 1, 0, 3, 'a', 'b', 'c'}),
+      frame({9, 0x83, 2}),
+  };
+  const auto localRequest = readRequest(kUnitId, 3, 0, 1);
+
+  for (const auto& candidate : candidates) {
+    Fixture fixture;
+    std::vector<uint8_t> backlog(candidate);
+    backlog.insert(backlog.end(), localRequest.begin(), localRequest.end());
+    fixture.serial.inject(backlog);
+    fixture.slave.poll();
+
+    TEST_ASSERT_EQUAL_UINT32(localRequest.size(), fixture.serial.rx.size());
+    TEST_ASSERT_EQUAL_UINT32(1u, fixture.slave.debugInfo().not_addressed);
+    TEST_ASSERT_EQUAL_UINT32(0u, fixture.slave.debugInfo().frames_bad);
+    TEST_ASSERT_TRUE(fixture.events.empty());
+  }
+}
+
+void test_buffered_fc69_is_applied_without_reply_and_preserves_local_tail() {
+  Fixture fixture;
+  fixture.allLocal = true;
+  const auto broadcast =
+      targetedWrite(kUnitId, 6, {0, 5, 0xBE, 0xEF});
+  const auto localRequest = readRequest(kUnitId, 3, 5, 1);
+  std::vector<uint8_t> backlog(broadcast);
+  backlog.insert(backlog.end(), localRequest.begin(), localRequest.end());
+  fixture.serial.inject(backlog);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_HEX16(0xBEEFu, fixture.holding[5]);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_EQUAL_UINT64(1u, fixture.appliedWriteCount);
+  TEST_ASSERT_EQUAL_UINT32(localRequest.size(), fixture.serial.rx.size());
+
+  fixture.slave.poll();
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+  assertSingleTx(fixture, frame({kUnitId, 3, 2, 0xBE, 0xEF}));
+  TEST_ASSERT_EQUAL_UINT32(0u, fixture.slave.debugInfo().frames_bad);
+  TEST_ASSERT_TRUE(fixture.events.empty());
+}
+
+void test_buffered_local_unicast_is_dropped_before_side_effects_and_retry_survives() {
+  Fixture fixture;
+  fixture.allLocal = true;
+  const auto stale = writeSingle(kUnitId, 6, 4, 0xAAAAu);
+  const auto retry = writeSingle(kUnitId, 6, 4, 0xBBBBu);
+  std::vector<uint8_t> backlog(stale);
+  backlog.insert(backlog.end(), retry.begin(), retry.end());
+  fixture.serial.inject(backlog);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_HEX16(0u, fixture.holding[4]);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.appliedWriteCount);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(retry.size(), fixture.serial.rx.size());
+
+  fixture.slave.poll();
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_HEX16(0xBBBBu, fixture.holding[4]);
+  TEST_ASSERT_EQUAL_UINT64(1u, fixture.appliedWriteCount);
+  assertSingleTx(fixture, retry);
+  TEST_ASSERT_EQUAL_UINT32(2u, fixture.slave.debugInfo().frames_ok);
+  TEST_ASSERT_EQUAL_UINT32(0u, fixture.slave.debugInfo().frames_bad);
+  TEST_ASSERT_TRUE(fixture.events.empty());
+}
+
+void test_local_request_prefix_followed_without_t35_has_no_side_effect() {
+  Fixture fixture;
+  fixture.allLocal = true;
+  const auto request = writeSingle(kUnitId, 6, 4, 0xAAAAu);
+  std::vector<uint8_t> malformed(request);
+  malformed.push_back(0x00u);
+  fixture.serial.inject(malformed);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_HEX16(0u, fixture.holding[4]);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.appliedWriteCount);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.serial.rx.size());
+}
+
+void test_buffered_broadcast_request_is_not_split_as_a_response_prefix() {
+  Fixture fixture;
+  fixture.allLocal = true;
+  std::vector<bool> values(25u, false);
+  values[0] = true;
+  values[1] = true;
+  values[4] = true;
+  const auto broadcast = writeMultipleCoils(0, 13, values);
+  // These two request bytes happen to be the valid CRC of the first six
+  // bytes. A direction-blind classifier would mistake this prefix for an
+  // eight-byte FC15 response and could apply a truncated broadcast write.
+  TEST_ASSERT_EQUAL_UINT8(0x04u, broadcast[6]);
+  TEST_ASSERT_EQUAL_UINT8(0x13u, broadcast[7]);
+  TEST_ASSERT_EQUAL_HEX16(0x1304u, crc16(broadcast.data(), 6u));
+  const auto localRequest = readRequest(kUnitId, 1, 13, 25);
+  std::vector<uint8_t> backlog(broadcast);
+  backlog.insert(backlog.end(), localRequest.begin(), localRequest.end());
+  fixture.serial.inject(backlog);
+
+  fixture.slave.poll();
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    TEST_ASSERT_EQUAL(values[i], fixture.coils[13u + i]);
+  }
+  TEST_ASSERT_EQUAL_UINT32(localRequest.size(), fixture.serial.rx.size());
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+
+  fixture.slave.poll();
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+  assertSingleTx(fixture, frame({kUnitId, 1, 4, 0x13, 0, 0, 0}));
+}
+
+void test_one_custom_classifier_handles_multiple_buffered_shapes() {
+  Fixture fixture;
+  fixture.slave.setAdditionalFrameCandidateFn(&multipleCustomFrameCandidates);
+  fixture.holding[2] = 0x1234u;
+  const auto customA = frame({9, 65, 0xAA});
+  const auto customB = frame({10, 66, 0xBB, 0xCC});
+  const auto localRequest = readRequest(kUnitId, 3, 2, 1);
+  std::vector<uint8_t> backlog(customA);
+  backlog.insert(backlog.end(), customB.begin(), customB.end());
+  backlog.insert(backlog.end(), localRequest.begin(), localRequest.end());
+  fixture.serial.inject(backlog);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(customB.size() + localRequest.size(),
+                           fixture.serial.rx.size());
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(localRequest.size(), fixture.serial.rx.size());
+  fixture.slave.poll();
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+
+  assertSingleTx(fixture, frame({kUnitId, 3, 2, 0x12, 0x34}));
+  TEST_ASSERT_EQUAL_UINT32(2u, fixture.slave.debugInfo().not_addressed);
+}
+
+void test_overflow_discard_is_bounded_and_converges_after_idle() {
+  Fixture fixture;
+  fixture.allLocal = true;
+  std::vector<uint8_t> noise(700u, 0xA5u);
+  fixture.serial.inject(noise);
+
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(444u, fixture.serial.rx.size());
+  TEST_ASSERT_EQUAL_UINT32(1u, fixture.slave.debugInfo().rx_overflows);
+  TEST_ASSERT_TRUE(fixture.slave.workState().rxInFrame());
+  fixture.slave.poll();
+  TEST_ASSERT_EQUAL_UINT32(188u, fixture.serial.rx.size());
+  fixture.slave.poll();
+  TEST_ASSERT_TRUE(fixture.serial.rx.empty());
+
+  const auto beforeIdle = writeSingle(kUnitId, 6, 6, 0xAAAAu);
+  fixture.serial.inject(beforeIdle);
+  fixture.slave.poll();
+  TEST_ASSERT_TRUE(fixture.serial.rx.empty());
+  TEST_ASSERT_EQUAL_HEX16(0u, fixture.holding[6]);
+  TEST_ASSERT_EQUAL_UINT64(0u, fixture.serial.writeCalls);
+  TEST_ASSERT_TRUE(fixture.slave.workState().rxInFrame());
+
+  ArduinoTest::advance(kFrameTimeoutUs8N1At19200);
+  fixture.slave.poll();
+  TEST_ASSERT_FALSE(fixture.slave.workState().rxInFrame());
+  const auto recovered = writeSingle(kUnitId, 6, 6, 0xBBBBu);
+  fixture.transact(recovered);
+  TEST_ASSERT_EQUAL_HEX16(0xBBBBu, fixture.holding[6]);
+  assertSingleTx(fixture, recovered);
+}
+
 void test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync() {
   Fixture fixture;
   fixture.holding[0] = 0x55AAu;
@@ -430,6 +695,8 @@ void test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync() {
   TEST_ASSERT_EQUAL_UINT64(badCrc.size() + foreign.size() + 8u,
                            ArduinoTest::microsCalls);
   TEST_ASSERT_EQUAL_UINT32(1u, fixture.slave.debugInfo().frames_bad);
+  TEST_ASSERT_EQUAL_UINT16(badCrc.size(),
+                           fixture.slave.debugInfo().last_bad_len);
   TEST_ASSERT_EQUAL_UINT32(1u, fixture.slave.debugInfo().not_addressed);
   const auto good = readRequest(kUnitId, 3, 0, 1);
   fixture.transact(good);
@@ -1613,7 +1880,7 @@ void test_bridge_mode_native_object_footprint_stays_bounded() {
   static_assert(std::is_trivially_copyable<ModbusRTUSlave::BridgeIngressEntry>::value,
                 "ModbusRTUSlave::BridgeIngressEntry must remain safe for journal snapshot memcpy");
   TEST_ASSERT_EQUAL_UINT32(76u, sizeof(ModbusRTUSlave::BridgeIngressEntry));
-  TEST_ASSERT_EQUAL_UINT32(16144u, sizeof(ModbusRTUSlave));
+  TEST_ASSERT_EQUAL_UINT32(16152u, sizeof(ModbusRTUSlave));
 }
 
 } // namespace
@@ -1626,6 +1893,15 @@ int main(int, char**) {
   }
   RUN_TEST(test_frame_completes_exactly_at_t35_and_read_wire_image_is_stable);
   RUN_TEST(test_partial_frame_restarts_t35_from_the_last_byte);
+  RUN_TEST(test_queued_continuation_is_not_split_by_a_delayed_poll);
+  RUN_TEST(test_buffered_foreign_request_response_and_exception_preserve_local_tail);
+  RUN_TEST(test_all_deterministic_standard_candidate_lengths_preserve_a_local_tail);
+  RUN_TEST(test_buffered_fc69_is_applied_without_reply_and_preserves_local_tail);
+  RUN_TEST(test_buffered_local_unicast_is_dropped_before_side_effects_and_retry_survives);
+  RUN_TEST(test_local_request_prefix_followed_without_t35_has_no_side_effect);
+  RUN_TEST(test_buffered_broadcast_request_is_not_split_as_a_response_prefix);
+  RUN_TEST(test_one_custom_classifier_handles_multiple_buffered_shapes);
+  RUN_TEST(test_overflow_discard_is_bounded_and_converges_after_idle);
   RUN_TEST(test_crc_and_foreign_unit_rejection_leave_transport_quiet_then_resync);
   RUN_TEST(test_short_addressed_frame_reports_one_malformed_event_without_reply);
   RUN_TEST(test_all_read_function_wire_images_and_coil_padding_are_stable);
