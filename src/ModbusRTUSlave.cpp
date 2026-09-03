@@ -1217,14 +1217,17 @@ bool ModbusRTUSlave::_candidateCrcGood(uint16_t receivedLen) {
          _bytesToWord(_buf[receivedLen - 1U], _buf[receivedLen - 2U]);
 }
 
-bool ModbusRTUSlave::_finishRequest(bool bufferedCandidate) {
+bool ModbusRTUSlave::_finishRequest(bool bufferedCrcValidatedCandidate) {
   const uint16_t frameLen = _rxNumBytes;
   _rxInFrame = false;
-  _rxBufferedCandidate = bufferedCandidate;
+  _rxBufferedCandidate = bufferedCrcValidatedCandidate;
 
   const bool addressed = (_buf[0] == _id || _buf[0] == 0U);
   if(frameLen >= 4U && addressed){
-    const bool ok = _candidateCrcGood(frameLen);
+    // Buffered candidates reach here only after the extraction path has
+    // validated their CRC. Reuse that result instead of scanning the ADU twice.
+    const bool ok = bufferedCrcValidatedCandidate ||
+                    _candidateCrcGood(frameLen);
     if(ok){
       _rxLen = frameLen;
     }

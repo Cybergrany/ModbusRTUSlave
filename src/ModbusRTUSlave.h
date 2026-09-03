@@ -334,7 +334,7 @@ class ModbusRTUSlave {
     void _processWriteMultipleHoldingRegisters();
 
     bool _readRequest();
-    bool _finishRequest(bool bufferedCandidate);
+    bool _finishRequest(bool bufferedCrcValidatedCandidate);
     bool _candidateCrcGood(uint16_t receivedLen);
     void _beginRxDiscard();
     void _drainRxDiscard();
